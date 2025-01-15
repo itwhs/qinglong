@@ -1,3 +1,4 @@
+import intl from 'react-intl-universal';
 import React, { useEffect, useState } from 'react';
 import { Typography, Input, Form, Button, Select, message } from 'antd';
 import { request } from '@/utils/http';
@@ -12,25 +13,25 @@ const NotificationSetting = ({ data }: any) => {
   const [form] = Form.useForm();
 
   const handleOk = (values: any) => {
+    setLoading(true);
     const { type } = values;
     if (type == 'closed') {
       values.type = '';
     }
 
     request
-      .put(`${config.apiPrefix}user/notification`, {
-        data: {
-          ...values,
-        },
-      })
+      .put(`${config.apiPrefix}user/notification`, values)
       .then(({ code, data }) => {
         if (code === 200) {
-          message.success(values.type ? '通知发送成功' : '通知关闭成功');
+          message.success(
+            values.type ? intl.get('通知发送成功') : intl.get('通知关闭成功'),
+          );
         }
       })
       .catch((error: any) => {
         console.log(error);
-      });
+      })
+      .finally(() => setLoading(false));
   };
 
   const notificationModeChange = (value: string) => {
@@ -50,13 +51,13 @@ const NotificationSetting = ({ data }: any) => {
     <div>
       <Form onFinish={handleOk} form={form} layout="vertical">
         <Form.Item
-          label="通知方式"
+          label={intl.get('通知方式')}
           name="type"
           rules={[{ required: true }]}
           style={{ maxWidth: 400 }}
           initialValue={notificationMode}
         >
-          <Select onChange={notificationModeChange}>
+          <Select onChange={notificationModeChange} disabled={loading}>
             {config.notificationModes.map((x) => (
               <Option key={x.value} value={x.value}>
                 {x.label}
@@ -74,7 +75,10 @@ const NotificationSetting = ({ data }: any) => {
             style={{ maxWidth: 400 }}
           >
             {x.items ? (
-              <Select placeholder={x.placeholder || `请选择${x.label}`}>
+              <Select
+                placeholder={x.placeholder || `${intl.get('请选择')} ${x.label}`}
+                disabled={loading}
+              >
                 {x.items.map((y) => (
                   <Option key={y.value} value={y.value}>
                     {y.label || y.value}
@@ -83,14 +87,15 @@ const NotificationSetting = ({ data }: any) => {
               </Select>
             ) : (
               <Input.TextArea
-                autoSize={true}
-                placeholder={x.placeholder || `请输入${x.label}`}
+                disabled={loading}
+                autoSize={{ minRows: 1, maxRows: 5 }}
+                placeholder={x.placeholder || `${intl.get('请输入')} ${x.label}`}
               />
             )}
           </Form.Item>
         ))}
-        <Button type="primary" htmlType="submit">
-          保存
+        <Button type="primary" htmlType="submit" disabled={loading}>
+          {loading ? intl.get('测试中...') : intl.get('保存')}
         </Button>
       </Form>
     </div>

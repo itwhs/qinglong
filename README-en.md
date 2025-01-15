@@ -1,30 +1,29 @@
-<p align="center">
-  <a href="https://github.com/whyour/qinglong">
-    <img width="150" src="https://user-images.githubusercontent.com/22700758/191449379-f9f56204-0e31-4a16-be5a-331f52696a73.png">
-  </a>
-</p>
-
-<h1 align="center">Green Dragon</h1>
-
 <div align="center">
+<img width="100" src="https://user-images.githubusercontent.com/22700758/191449379-f9f56204-0e31-4a16-be5a-331f52696a73.png">
 
-Timed task management panel with python3, javaScript, shell, typescript support
+<h1 align="center">Qinglong</h1>
 
-[![docker version][docker-version-image]][docker-version-url] [![docker pulls][docker-pulls-image]][docker-pulls-url] [![docker stars][docker-stars-image]][docker-stars-url] [![docker image size][docker-image-size-image]][docker-image-size-url]
+[简体中文](./README.md) | English
 
+Timed task management platform supporting Python3, JavaScript, Shell, Typescript
+
+[![npm version][npm-version-image]][npm-version-url] [![docker pulls][docker-pulls-image]][docker-pulls-url] [![docker stars][docker-stars-image]][docker-stars-url] [![docker image size][docker-image-size-image]][docker-image-size-url]
+
+[npm-version-image]: https://img.shields.io/npm/v/@whyour/qinglong?style=flat
+[npm-version-url]: https://www.npmjs.com/package/@whyour/qinglong?activeTab=readme
 [docker-pulls-image]: https://img.shields.io/docker/pulls/whyour/qinglong?style=flat
 [docker-pulls-url]: https://hub.docker.com/r/whyour/qinglong
-[docker-version-image]: https://img.shields.io/docker/v/whyour/qinglong?style=flat
-[docker-version-url]: https://hub.docker.com/r/whyour/qinglong/tags?page=1&ordering=last_updated
 [docker-stars-image]: https://img.shields.io/docker/stars/whyour/qinglong?style=flat
 [docker-stars-url]: https://hub.docker.com/r/whyour/qinglong
 [docker-image-size-image]: https://img.shields.io/docker/image-size/whyour/qinglong?style=flat
 [docker-image-size-url]: https://hub.docker.com/r/whyour/qinglong
+
+[Demo](http://demo.ninesix.cc:4433/) / [Issues](https://github.com/whyour/qinglong/issues) / [Telegram Channel](https://t.me/jiao_long) / [Buy Me a Coffee](https://www.buymeacoffee.com/qinglong)
+
+[演示](http://demo.ninesix.cc:4433/) / [反馈](https://github.com/whyour/qinglong/issues) / [Telegram 频道](https://t.me/jiao_long) / [打赏开发者](https://user-images.githubusercontent.com/22700758/244744295-29cd0cd1-c8bb-4ea1-adf6-29bd390ad4dd.jpg)
 </div>
 
-[![](https://user-images.githubusercontent.com/22700758/161788855-c4e51cb8-d4e9-44fe-bb17-ee1a56c8549b.png)](https://whyour.cn)
-
-[简体中文](./README.md) | English
+![cover](https://user-images.githubusercontent.com/22700758/244847235-8dc1ca21-e03f-4606-9458-0541fab60413.png)
 
 ## Features
 
@@ -36,146 +35,50 @@ Timed task management panel with python3, javaScript, shell, typescript support
 - Support dark mode
 - Support cell phone operation
 
+## Version
+
+### docker
+
+The `latest` image is built on `alpine` and the `debian` image is built on `debian-slim`. If you need to use a dependency that is not supported by `alpine`, it is recommended that you use the `debian` image.
+
+```bash
+docker pull whyour/qinglong:latest
+docker pull whyour/qinglong:debian
+```
+
+### npm
+
+The npm version supports `debian/ubuntu/alpine` systems and requires `node/npm/python3/pip3/pnpm` to be installed.
+
+```bash
+npm i @whyour/qinglong
+```
+
 ## Deployment
 
-### Local Deployment
+[View Documentation](https://qinglong.online/guide/getting-started/installation-guide)
+
+## Built-in API
+
+[View Documentation](https://qinglong.online/guide/user-guide/built-in-api)
+
+## Built-in commands
+
+[View Documentation](https://qinglong.online/guide/user-guide/basic-explanation)
+
+## Development
 
 ```bash
-# To be completed
+git clone https://github.com/whyour/qinglong.git
+cd qinglong
+cp .env.example .env
+# Recommended use pnpm https://pnpm.io/zh/installation
+npm install -g pnpm@8.3.1
+pnpm install
+pnpm start
 ```
 
-### Podman Deployment
-
-1. podman installation
-
-```bash
-https://podman.io/getting-started/installation
-```
-
-2. start the container
-
-```bash
-podman run -dit \
-  --network bridge \
-  -v $PWD/ql/data:/ql/data \
-  -p 5700:5700 \
-  --name qinglong \
-  --hostname qinglong \
-  --restart unless-stopped \
-  docker.io/whyour/qinglong:latest
-```
-
-### Docker Deployment
-
-1. docker installation
-
-```bash
-sudo curl -sSL get.docker.com | sh
-```
-
-2. configure domestic mirror sources
-
-```bash
-mkdir -p /etc/docker
-tee /etc/docker/daemon.json <<-'EOF'
-{
-  "registry-mirrors": [
-    "https://0b27f0a81a00f3560fbdc00ddd2f99e0.mirror.swr.myhuaweicloud.com",
-    "https://ypzju6vq.mirror.aliyuncs.com",
-    "https://registry.docker-cn.com",
-    "http://hub-mirror.c.163.com",
-    "https://docker.mirrors.ustc.edu.cn"
-  ]
-}
-EOF
-systemctl daemon-reload
-systemctl restart docker
-```
-
-3. start the container
-
-```bash
-docker run -dit \
-  -v $PWD/ql/data:/ql/data \
-  -p 5700:5700 \
-  --name qinglong \
-  --hostname qinglong \
-  --restart unless-stopped \
-  whyour/qinglong:latest
-```
-
-### Docker-compose Deployment
-
-1. docker-compose installation
-
-```bash
-sudo curl -L https://github.com/docker/compose/releases/download/1.16.1/docker-compose-`uname -s`-`uname -m` -o /usr/local/bin/docker-compose
-```
-
-2. start the container
-
-```bash
-mkdir qinglong
-wget https://raw.githubusercontent.com/whyour/qinglong/master/docker/docker-compose.yml
-
-# start
-docker-compose up -d
-# stop
-docker-compose down
-```
-
-3. access
-
-Open your browser and visit http://{ip}:5700
-
-## Use
-
-1. built-in commands
-
-```bash
-# Update and restart Green Dragon
-ql update                                                    
-# Run custom scripts extra.sh
-ql extra                                                     
-# Adding a single script file
-ql raw <file_url>                                             
-# Add a specific script for a single repository
-ql repo <repo_url> <whitelist> <blacklist> <dependence> <branch>   
-# Delete old logs
-ql rmlog <days>                                              
-# Start bot
-ql bot                                                       
-# Detecting the Green Dragon environment and repairing it
-ql check                                                     
-# Reset the number of login errors
-ql resetlet                                                  
-# Disable two-step login
-ql resettfa                                                  
-
-# Execute in sequence, if a random delay is set, it will be randomly delayed by a certain number of seconds
-task <file_path>                                             
-# Execute in sequence, regardless of whether a random delay is set, all run immediately, 
-# and the foreground will output the day, while recorded in the log file
-task <file_path> now                                         
-# Concurrent execution, regardless of whether a random delay is set, are run immediately, 
-# the foreground does not generate the day, directly recorded in the log file, and can be specified account execution
-task <file_path> conc <env_name> <account_number>(Optional) 
-# Specify the account to execute and run immediately regardless of whether a random delay is set 
-task <file_path> desi <env_name> <account_number>         
-```
-
-2. parameter description
-
-* file_url: Script address
-* repo_url: Repository address
-* whitelist: The whitelist when pulling the repository, i.e., the string contained in the path of the script to be pulled
-* blacklist: Blacklisting when pulling repositories, i.e. strings that are not included in the path of the script to be pulled
-* dependence: Pulling the dependencies needed for the repository will be copied directly from the repository to the repository directory under scripts, regardless of the blacklist
-* branch: Pull the branch of the repository
-* days: Number of days of logs to be kept
-* file_path: File path for task execution
-* env_name: The name of the environment variable that needs to be concurrent or specified at the time of task execution
-* account_number: Specify the account number of an environment variable to be executed when the task is executed
+Open your browser and visit <http://127.0.0.1:5700>
 
 ## Links
 
@@ -186,24 +89,6 @@ task <file_path> desi <env_name> <account_number>
 - [Umijs](https://umijs.org)
 - [darkreader](https://github.com/darkreader/darkreader)
 - [admin-server](https://github.com/sunpu007/admin-server)
-
-## Development
-
-```bash
-$ git clone git@github.com:whyour/qinglong.git
-$ cd qinglong
-$ cp .env.example .env
-# Recommended use pnpm https://pnpm.io/zh/installation
-$ npm install -g pnpm
-$ pnpm install
-$ pnpm start
-```
-
-Open your browser and visit http://127.0.0.1:5700
-
-## Communication
-
-[telegram channel](https://t.me/jiao_long)
 
 ## Name Origin
 

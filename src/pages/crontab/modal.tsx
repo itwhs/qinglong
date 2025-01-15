@@ -1,9 +1,11 @@
+import intl from 'react-intl-universal';
 import React, { useEffect, useState } from 'react';
-import { Modal, message, Input, Form, Button } from 'antd';
+import { Modal, message, Input, Form, Button, Space } from 'antd';
 import { request } from '@/utils/http';
 import config from '@/utils/config';
 import cronParse from 'cron-parser';
 import EditableTagGroup from '@/components/tag';
+import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons';
 
 const CronModal = ({
   cron,
@@ -19,18 +21,21 @@ const CronModal = ({
 
   const handleOk = async (values: any) => {
     setLoading(true);
-    const method = cron ? 'put' : 'post';
+    const method = cron?.id ? 'put' : 'post';
     const payload = { ...values };
-    if (cron) {
+    if (cron?.id) {
       payload.id = cron.id;
     }
     try {
-      const { code, data } = await request[method](`${config.apiPrefix}crons`, {
-        data: payload,
-      });
+      const { code, data } = await request[method](
+        `${config.apiPrefix}crons`,
+        payload,
+      );
 
       if (code === 200) {
-        message.success(cron ? '更新Cron成功' : '新建Cron成功');
+        message.success(
+          cron?.id ? intl.get('更新任务成功') : intl.get('创建任务成功'),
+        );
         handleCancel(data);
       }
       setLoading(false);
@@ -45,7 +50,7 @@ const CronModal = ({
 
   return (
     <Modal
-      title={cron ? '编辑任务' : '新建任务'}
+      title={cron?.id ? intl.get('编辑任务') : intl.get('创建任务')}
       open={visible}
       forceRender
       centered
@@ -69,23 +74,29 @@ const CronModal = ({
         name="form_in_modal"
         initialValues={cron}
       >
-        <Form.Item name="name" label="名称">
-          <Input placeholder="请输入任务名称" />
+        <Form.Item
+          name="name"
+          label={intl.get('名称')}
+          rules={[{ required: true, whitespace: true }]}
+        >
+          <Input placeholder={intl.get('请输入任务名称')} />
         </Form.Item>
         <Form.Item
           name="command"
-          label="命令"
+          label={intl.get('命令/脚本')}
           rules={[{ required: true, whitespace: true }]}
         >
           <Input.TextArea
             rows={4}
-            autoSize={true}
-            placeholder="请输入要执行的命令"
+            autoSize={{ minRows: 1, maxRows: 5 }}
+            placeholder={intl.get(
+              '支持输入脚本路径/任意系统可执行命令/task 脚本路径',
+            )}
           />
         </Form.Item>
         <Form.Item
           name="schedule"
-          label="定时规则"
+          label={intl.get('定时规则')}
           rules={[
             { required: true },
             {
@@ -93,16 +104,104 @@ const CronModal = ({
                 if (!value || cronParse.parseExpression(value).hasNext()) {
                   return Promise.resolve();
                 } else {
-                  return Promise.reject('Cron表达式格式有误');
+                  return Promise.reject(intl.get('Cron表达式格式有误'));
                 }
               },
             },
           ]}
         >
-          <Input placeholder="秒(可选) 分 时 天 月 周" />
+          <Input placeholder={intl.get('秒(可选) 分 时 天 月 周')} />
         </Form.Item>
-        <Form.Item name="labels" label="标签">
+        <Form.List name="extra_schedules">
+          {(fields, { add, remove }, { errors }) => (
+            <>
+              {fields.map(({ key, name, ...restField }) => (
+                <Form.Item key={key} noStyle>
+                  <Space className="view-create-modal-sorts" align="baseline">
+                    <Form.Item
+                      {...restField}
+                      name={[name, 'schedule']}
+                      rules={[{ required: true }]}
+                    >
+                      <Input
+                        placeholder={intl.get('秒(可选) 分 时 天 月 周')}
+                      />
+                    </Form.Item>
+                    <MinusCircleOutlined
+                      className="dynamic-delete-button"
+                      onClick={() => remove(name)}
+                    />
+                  </Space>
+                </Form.Item>
+              ))}
+              <Form.Item>
+                <a onClick={() => add({ schedule: '' })}>
+                  <PlusOutlined />
+                  {intl.get('新增定时规则')}
+                </a>
+              </Form.Item>
+              <Form.ErrorList errors={errors} />
+            </>
+          )}
+        </Form.List>
+        <Form.Item name="labels" label={intl.get('标签')}>
           <EditableTagGroup />
+        </Form.Item>
+        <Form.Item
+          name="task_before"
+          label={intl.get('执行前')}
+          tooltip={intl.get(
+            '运行任务前执行的命令，比如 cp/mv/python3 xxx.py/node xxx.js',
+          )}
+          rules={[
+            {
+              validator(rule, value) {
+                if (
+                  value &&
+                  (value.includes(' task ') || value.startsWith('task '))
+                ) {
+                  return Promise.reject(intl.get('不能包含 task 命令'));
+                }
+                return Promise.resolve();
+              },
+            },
+          ]}
+        >
+          <Input.TextArea
+            rows={4}
+            autoSize={{ minRows: 1, maxRows: 5 }}
+            placeholder={intl.get(
+              '请输入运行任务前要执行的命令，不能包含 task 命令',
+            )}
+          />
+        </Form.Item>
+        <Form.Item
+          name="task_after"
+          label={intl.get('执行后')}
+          tooltip={intl.get(
+            '运行任务后执行的命令，比如 cp/mv/python3 xxx.py/node xxx.js',
+          )}
+          rules={[
+            {
+              validator(rule, value) {
+                if (
+                  value &&
+                  (value.includes(' task ') || value.startsWith('task '))
+                ) {
+                  return Promise.reject(intl.get('不能包含 task 命令'));
+                }
+                return Promise.resolve();
+              },
+            },
+          ]}
+        >
+          <Input.TextArea
+            rows={4}
+            autoSize={{ minRows: 1, maxRows: 5 }}
+            placeholder={intl.get(
+              '请输入运行任务后要执行的命令，不能包含 task 命令',
+            )}
+          />
         </Form.Item>
       </Form>
     </Modal>
@@ -130,14 +229,14 @@ const CronLabelModal = ({
         try {
           const { code, data } = await request[action](
             `${config.apiPrefix}crons/labels`,
-            {
-              data: payload,
-            },
+            payload,
           );
 
           if (code === 200) {
             message.success(
-              action === 'post' ? '添加Labels成功' : '删除Labels成功',
+              action === 'post'
+                ? intl.get('添加Labels成功')
+                : intl.get('删除Labels成功'),
             );
             handleCancel(true);
           }
@@ -156,18 +255,18 @@ const CronLabelModal = ({
   }, [ids, visible]);
 
   const buttons = [
-    <Button onClick={() => handleCancel(false)}>取消</Button>,
+    <Button onClick={() => handleCancel(false)}>{intl.get('取消')}</Button>,
     <Button type="primary" danger onClick={() => update('delete')}>
-      删除
+      {intl.get('删除')}
     </Button>,
     <Button type="primary" onClick={() => update('post')}>
-      添加
+      {intl.get('添加')}
     </Button>,
   ];
 
   return (
     <Modal
-      title="批量修改标签"
+      title={intl.get('批量修改标签')}
       open={visible}
       footer={buttons}
       centered
@@ -177,7 +276,7 @@ const CronLabelModal = ({
       confirmLoading={loading}
     >
       <Form form={form} layout="vertical" name="form_in_label_modal">
-        <Form.Item name="labels" label="标签">
+        <Form.Item name="labels" label={intl.get('标签')}>
           <EditableTagGroup />
         </Form.Item>
       </Form>

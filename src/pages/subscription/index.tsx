@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import intl from 'react-intl-universal';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Button,
   message,
@@ -11,6 +12,7 @@ import {
   Typography,
   Input,
   Tooltip,
+  Checkbox,
 } from 'antd';
 import {
   ClockCircleOutlined,
@@ -29,11 +31,12 @@ import config from '@/utils/config';
 import { PageContainer } from '@ant-design/pro-layout';
 import { request } from '@/utils/http';
 import SubscriptionModal from './modal';
-import { getTableScroll } from '@/utils/index';
 import { history, useOutletContext } from '@umijs/max';
 import './index.less';
 import SubscriptionLogModal from './logModal';
 import { SharedContext } from '@/layouts';
+import useTableScrollHeight from '@/hooks/useTableScrollHeight';
+import WebSocketManager from '@/utils/websocket';
 
 const { Text, Paragraph } = Typography;
 const { Search } = Input;
@@ -59,26 +62,23 @@ export enum SubscriptionType {
 }
 
 const Subscription = () => {
-  const { headerStyle, isPhone, socketMessage } =
-    useOutletContext<SharedContext>();
+  const { headerStyle, isPhone } = useOutletContext<SharedContext>();
 
   const columns: any = [
     {
-      title: '名称',
+      title: intl.get('名称'),
       dataIndex: 'name',
       key: 'name',
       width: 150,
-      align: 'center' as const,
       sorter: {
         compare: (a: any, b: any) => a.name.localeCompare(b.name),
         multiple: 2,
       },
     },
     {
-      title: '链接',
+      title: intl.get('链接'),
       dataIndex: 'url',
       key: 'url',
-      align: 'center' as const,
       sorter: {
         compare: (a: any, b: any) => a.name.localeCompare(b.name),
         multiple: 2,
@@ -89,7 +89,6 @@ const Subscription = () => {
             style={{
               wordBreak: 'break-all',
               marginBottom: 0,
-              textAlign: 'left',
             }}
             ellipsis={{ tooltip: text, rows: 2 }}
           >
@@ -99,29 +98,26 @@ const Subscription = () => {
       },
     },
     {
-      title: '类型',
+      title: intl.get('类型'),
       dataIndex: 'type',
       key: 'type',
       width: 130,
-      align: 'center' as const,
       render: (text: string, record: any) => {
         return (SubscriptionType as any)[record.type];
       },
     },
     {
-      title: '分支',
+      title: intl.get('分支'),
       dataIndex: 'branch',
       key: 'branch',
       width: 130,
-      align: 'center' as const,
       render: (text: string, record: any) => {
         return record.branch || '-';
       },
     },
     {
-      title: '定时规则',
+      title: intl.get('定时规则'),
       width: 180,
-      align: 'center' as const,
       render: (text: string, record: any) => {
         if (record.schedule_type === 'interval') {
           const { type, value } = record.interval_schedule;
@@ -131,22 +127,21 @@ const Subscription = () => {
       },
     },
     {
-      title: '状态',
+      title: intl.get('状态'),
       key: 'status',
       dataIndex: 'status',
-      align: 'center' as const,
       width: 110,
       filters: [
         {
-          text: '运行中',
+          text: intl.get('运行中'),
           value: 0,
         },
         {
-          text: '空闲中',
+          text: intl.get('空闲中'),
           value: 1,
         },
         {
-          text: '已禁用',
+          text: intl.get('已禁用'),
           value: 2,
         },
       ],
@@ -164,7 +159,7 @@ const Subscription = () => {
             <>
               {record.status === SubscriptionStatus.idle && (
                 <Tag icon={<ClockCircleOutlined />} color="default">
-                  空闲中
+                  {intl.get('空闲中')}
                 </Tag>
               )}
               {record.status === SubscriptionStatus.running && (
@@ -172,7 +167,7 @@ const Subscription = () => {
                   icon={<Loading3QuartersOutlined spin />}
                   color="processing"
                 >
-                  运行中
+                  {intl.get('运行中')}
                 </Tag>
               )}
             </>
@@ -180,55 +175,48 @@ const Subscription = () => {
           {record.is_disabled === 1 &&
             record.status === SubscriptionStatus.idle && (
               <Tag icon={<CloseCircleOutlined />} color="error">
-                已禁用
+                {intl.get('已禁用')}
               </Tag>
             )}
         </>
       ),
     },
     {
-      title: '操作',
+      title: intl.get('操作'),
       key: 'action',
-      align: 'center' as const,
-      width: 130,
+      width: 140,
       render: (text: string, record: any, index: number) => {
         const isPc = !isPhone;
         return (
           <Space size="middle">
             {record.status === SubscriptionStatus.idle && (
-              <Tooltip title={isPc ? '运行' : ''}>
-                <a
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    runSubscription(record, index);
-                  }}
-                >
-                  <PlayCircleOutlined />
-                </a>
-              </Tooltip>
-            )}
-            {record.status !== SubscriptionStatus.idle && (
-              <Tooltip title={isPc ? '停止' : ''}>
-                <a
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    stopSubsciption(record, index);
-                  }}
-                >
-                  <PauseCircleOutlined />
-                </a>
-              </Tooltip>
-            )}
-            <Tooltip title={isPc ? '日志' : ''}>
               <a
                 onClick={(e) => {
                   e.stopPropagation();
-                  setLogSubscription({ ...record, timestamp: Date.now() });
+                  runSubscription(record, index);
                 }}
               >
-                <FileTextOutlined />
+                {intl.get('运行')}
               </a>
-            </Tooltip>
+            )}
+            {record.status !== SubscriptionStatus.idle && (
+              <a
+                onClick={(e) => {
+                  e.stopPropagation();
+                  stopSubsciption(record, index);
+                }}
+              >
+                {intl.get('停止')}
+              </a>
+            )}
+            <a
+              onClick={(e) => {
+                e.stopPropagation();
+                setLogSubscription({ ...record, timestamp: Date.now() });
+              }}
+            >
+              {intl.get('日志')}
+            </a>
             <MoreBtn key="more" record={record} index={index} />
           </Space>
         );
@@ -243,26 +231,27 @@ const Subscription = () => {
   const [searchText, setSearchText] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [tableScrollHeight, setTableScrollHeight] = useState<number>();
-  const [searchValue, setSearchValue] = useState('');
   const [isLogModalVisible, setIsLogModalVisible] = useState(false);
   const [logSubscription, setLogSubscription] = useState<any>();
+  const tableRef = useRef<HTMLDivElement>(null);
+  const tableScrollHeight = useTableScrollHeight(tableRef);
+  const deleteCheckRef = useRef(false);
 
   const runSubscription = (record: any, index: number) => {
     Modal.confirm({
-      title: '确认运行',
+      title: intl.get('确认运行'),
       content: (
         <>
-          确认运行定时任务{' '}
+          {intl.get('确认运行定时任务')}{' '}
           <Text style={{ wordBreak: 'break-all' }} type="warning">
             {record.name}
           </Text>{' '}
-          吗
+          {intl.get('吗')}
         </>
       ),
       onOk() {
         request
-          .put(`${config.apiPrefix}subscriptions/run`, { data: [record.id] })
+          .put(`${config.apiPrefix}subscriptions/run`, [record.id])
           .then(({ code, data }) => {
             if (code === 200) {
               const result = [...value];
@@ -285,19 +274,19 @@ const Subscription = () => {
 
   const stopSubsciption = (record: any, index: number) => {
     Modal.confirm({
-      title: '确认停止',
+      title: intl.get('确认停止'),
       content: (
         <>
-          确认停止定时任务{' '}
+          {intl.get('确认停止定时任务')}{' '}
           <Text style={{ wordBreak: 'break-all' }} type="warning">
             {record.name}
           </Text>{' '}
-          吗
+          {intl.get('吗')}
         </>
       ),
       onOk() {
         request
-          .put(`${config.apiPrefix}subscriptions/stop`, { data: [record.id] })
+          .put(`${config.apiPrefix}subscriptions/stop`, [record.id])
           .then(({ code, data }) => {
             if (code === 200) {
               const result = [...value];
@@ -342,24 +331,36 @@ const Subscription = () => {
     setIsModalVisible(true);
   };
 
+  const onCheckChange = (e) => {
+    deleteCheckRef.current = e.target.checked;
+  };
+
   const delSubscription = (record: any, index: number) => {
     Modal.confirm({
-      title: '确认删除',
+      title: intl.get('确认删除'),
       content: (
         <>
-          确认删除定时订阅{' '}
+          {intl.get('确认删除定时订阅')}{' '}
           <Text style={{ wordBreak: 'break-all' }} type="warning">
             {record.name}
           </Text>{' '}
-          吗
+          {intl.get('吗')}
+          <div style={{ marginTop: 20 }}>
+            <Checkbox onChange={onCheckChange}>
+              {intl.get('同时删除关联任务和脚本')}
+            </Checkbox>
+          </div>
         </>
       ),
       onOk() {
         request
-          .delete(`${config.apiPrefix}subscriptions`, { data: [record.id] })
+          .delete(`${config.apiPrefix}subscriptions`, {
+            data: [record.id],
+            params: { force: deleteCheckRef.current },
+          })
           .then(({ code, data }) => {
             if (code === 200) {
-              message.success('删除成功');
+              message.success(intl.get('删除成功'));
               const result = [...value];
               const i = result.findIndex((x) => x.id === record.id);
               if (i !== -1) {
@@ -377,15 +378,18 @@ const Subscription = () => {
 
   const enabledOrDisabledSubscription = (record: any, index: number) => {
     Modal.confirm({
-      title: `确认${record.is_disabled === 1 ? '启用' : '禁用'}`,
+      title: `确认${
+        record.is_disabled === 1 ? intl.get('启用') : intl.get('禁用')
+      }`,
       content: (
         <>
-          确认{record.is_disabled === 1 ? '启用' : '禁用'}
-          定时订阅{' '}
+          {intl.get('确认')}
+          {record.is_disabled === 1 ? intl.get('启用') : intl.get('禁用')}
+          {intl.get('定时订阅')}{' '}
           <Text style={{ wordBreak: 'break-all' }} type="warning">
             {record.name}
           </Text>{' '}
-          吗
+          {intl.get('吗')}
         </>
       ),
       onOk() {
@@ -394,9 +398,7 @@ const Subscription = () => {
             `${config.apiPrefix}subscriptions/${
               record.is_disabled === 1 ? 'enable' : 'disable'
             }`,
-            {
-              data: [record.id],
-            },
+            [record.id],
           )
           .then(({ code, data }) => {
             if (code === 200) {
@@ -424,31 +426,29 @@ const Subscription = () => {
     index: number;
   }> = ({ record, index }) => (
     <Dropdown
-      arrow={{ pointAtCenter: true }}
       placement="bottomRight"
       trigger={['click']}
-      overlay={
-        <Menu
-          items={[
-            { label: '编辑', key: 'edit', icon: <EditOutlined /> },
-            {
-              label: record.is_disabled === 1 ? '启用' : '禁用',
-              key: 'enableOrDisable',
-              icon:
-                record.is_disabled === 1 ? (
-                  <CheckCircleOutlined />
-                ) : (
-                  <StopOutlined />
-                ),
-            },
-            { label: '删除', key: 'delete', icon: <DeleteOutlined /> },
-          ]}
-          onClick={({ key, domEvent }) => {
-            domEvent.stopPropagation();
-            action(key, record, index);
-          }}
-        />
-      }
+      menu={{
+        items: [
+          { label: intl.get('编辑'), key: 'edit', icon: <EditOutlined /> },
+          {
+            label:
+              record.is_disabled === 1 ? intl.get('启用') : intl.get('禁用'),
+            key: 'enableOrDisable',
+            icon:
+              record.is_disabled === 1 ? (
+                <CheckCircleOutlined />
+              ) : (
+                <StopOutlined />
+              ),
+          },
+          { label: intl.get('删除'), key: 'delete', icon: <DeleteOutlined /> },
+        ],
+        onClick: ({ key, domEvent }) => {
+          domEvent.stopPropagation();
+          action(key, record, index);
+        },
+      }}
     >
       <a onClick={(e) => e.stopPropagation()}>
         <EllipsisOutlined />
@@ -508,23 +508,31 @@ const Subscription = () => {
       : 'subscription';
   };
 
-  useEffect(() => {
-    if (!socketMessage) return;
-    const { type, message, references } = socketMessage;
-    if (type === 'runSubscriptionEnd' && references.length > 0) {
-      const result = [...value];
+  const handleMessage = useCallback((payload: any) => {
+    const { message, references } = payload;
+    setValue((p) => {
+      const result = [...p];
       for (let i = 0; i < references.length; i++) {
-        const index = value.findIndex((x) => x.id === references[i]);
+        const index = p.findIndex((x) => x.id === references[i]);
         if (index !== -1) {
           result.splice(index, 1, {
-            ...value[index],
+            ...p[index],
             status: SubscriptionStatus.idle,
           });
         }
       }
-      setValue(result);
-    }
-  }, [socketMessage]);
+      return result;
+    });
+  }, []);
+
+  useEffect(() => {
+    const ws = WebSocketManager.getInstance();
+    ws.subscribe('runSubscriptionEnd', handleMessage);
+
+    return () => {
+      ws.unsubscribe('runSubscriptionEnd', handleMessage);
+    };
+  }, []);
 
   useEffect(() => {
     if (logSubscription) {
@@ -539,28 +547,23 @@ const Subscription = () => {
 
   useEffect(() => {
     setPageSize(parseInt(localStorage.getItem('pageSize') || '20'));
-    setTimeout(() => {
-      setTableScrollHeight(getTableScroll());
-    });
   }, []);
 
   return (
     <PageContainer
       className="ql-container-wrapper subscriptiontab-wrapper"
-      title="订阅管理"
+      title={intl.get('订阅管理')}
       extra={[
         <Search
-          placeholder="请输入名称或者关键词"
+          placeholder={intl.get('请输入名称或者关键词')}
           style={{ width: 'auto' }}
           enterButton
           allowClear
           loading={loading}
-          value={searchValue}
-          onChange={(e) => setSearchValue(e.target.value)}
           onSearch={onSearch}
         />,
         <Button key="2" type="primary" onClick={() => addSubscription()}>
-          新建订阅
+          {intl.get('创建订阅')}
         </Button>,
       ]}
       header={{
@@ -568,6 +571,7 @@ const Subscription = () => {
       }}
     >
       <Table
+        ref={tableRef}
         columns={columns}
         pagination={{
           current: currentPage,

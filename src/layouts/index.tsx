@@ -1,28 +1,23 @@
-import React, { useEffect, useState, useRef } from 'react';
-import ProLayout, { PageLoading } from '@ant-design/pro-layout';
-import * as DarkReader from '@umijs/ssr-darkreader';
-import defaultProps from './defaultProps';
-import { Link, history, Outlet, useLocation } from '@umijs/max';
+import config from '@/utils/config';
+import { useCtx, useTheme } from '@/utils/hooks';
+import { request } from '@/utils/http';
 import {
   LogoutOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   UserOutlined,
 } from '@ant-design/icons';
-import config from '@/utils/config';
-import { request } from '@/utils/http';
-import './index.less';
+import ProLayout, { PageLoading } from '@ant-design/pro-layout';
+import { history, Link, Outlet, useLocation } from '@umijs/max';
+import * as DarkReader from '@umijs/ssr-darkreader';
+import { Avatar, Badge, Dropdown, Image, MenuProps, Tooltip } from 'antd';
+import React, { useEffect, useState } from 'react';
+import intl from 'react-intl-universal';
 import vhCheck from 'vh-check';
-import { version, changeLogLink, changeLog } from '../version';
-import { useCtx, useTheme } from '@/utils/hooks';
-import { message, Badge, Modal, Avatar, Dropdown, Menu, Image } from 'antd';
-// @ts-ignore
-import SockJS from 'sockjs-client';
-import * as Sentry from '@sentry/react';
+import defaultProps from './defaultProps';
+import './index.less';
 import { init } from '../utils/init';
-import 'codemirror/mode/javascript/javascript';
-import 'codemirror/mode/python/python';
-import 'codemirror/mode/shell/shell';
+import WebSocketManager from '../utils/websocket';
 
 export interface SharedContext {
   headerStyle: React.CSSProperties;
@@ -31,7 +26,16 @@ export interface SharedContext {
   user: any;
   reloadUser: (needLoading?: boolean) => void;
   reloadTheme: () => void;
-  socketMessage: any;
+  systemInfo: TSystemInfo;
+}
+
+interface TSystemInfo {
+  branch: 'develop' | 'master';
+  isInitialized: boolean;
+  publishTime: number;
+  version: string;
+  changeLog: string;
+  changeLogLink: string;
 }
 
 export default function () {
@@ -40,9 +44,7 @@ export default function () {
   const { theme, reloadTheme } = useTheme();
   const [user, setUser] = useState<any>({});
   const [loading, setLoading] = useState<boolean>(true);
-  const [systemInfo, setSystemInfo] = useState<{ isInitialized: boolean }>();
-  const ws = useRef<any>(null);
-  const [socketMessage, setSocketMessage] = useState<any>();
+  const [systemInfo, setSystemInfo] = useState<TSystemInfo>();
   const [collapsed, setCollapsed] = useState(false);
   const [initLoading, setInitLoading] = useState<boolean>(true);
   const {
@@ -69,14 +71,14 @@ export default function () {
           if (!data.isInitialized) {
             history.push('/initialization');
           } else {
+            init(data.version);
             getUser();
           }
         }
       })
       .catch((error) => {
         console.log(error);
-      })
-      .finally(() => setInitLoading(false));
+      });
   };
 
   const getUser = (needLoading = true) => {
@@ -97,6 +99,22 @@ export default function () {
       });
   };
 
+  const getHealthStatus = () => {
+    request
+      .get(`${config.apiPrefix}public/health`)
+      .then((res) => {
+        if (res?.data?.status === 1) {
+          getSystemInfo();
+        } else {
+          history.push('/error');
+        }
+      })
+      .catch((error) => {
+        history.push('/error');
+      })
+      .finally(() => setInitLoading(false));
+  };
+
   const reloadUser = (needLoading = false) => {
     getUser(needLoading);
   };
@@ -108,10 +126,8 @@ export default function () {
   }, [location.pathname]);
 
   useEffect(() => {
-    if (!systemInfo) {
-      getSystemInfo();
-    }
-  }, [systemInfo]);
+    getHealthStatus();
+  }, []);
 
   useEffect(() => {
     if (theme === 'vs-dark') {
@@ -123,7 +139,6 @@ export default function () {
 
   useEffect(() => {
     vhCheck();
-    init();
 
     const _theme = localStorage.getItem('qinglong_dark_theme') || 'auto';
     if (typeof window === 'undefined') return;
@@ -148,32 +163,14 @@ export default function () {
 
   useEffect(() => {
     if (!user || !user.username) return;
-    ws.current = new SockJS(
-      `${window.location.origin}/api/ws?token=${localStorage.getItem(
-        config.authKey,
-      )}`,
+    const ws = WebSocketManager.getInstance(
+      `${window.location.origin}${
+        config.apiPrefix
+      }ws?token=${localStorage.getItem(config.authKey)}`,
     );
 
-    ws.current.onmessage = (e: any) => {
-      try {
-        const data = JSON.parse(e.data);
-        if (data.type === 'ping') {
-          if (data && data.message === 'hanhh') {
-            console.log('WS connection succeeded !!!');
-          } else {
-            console.log('WS connection Failed !!!', e);
-          }
-        }
-        setSocketMessage(data);
-      } catch (error) {
-        console.log('websocket连接失败', e);
-      }
-    };
-
-    const wsCurrent = ws.current;
-
     return () => {
-      wsCurrent.close();
+      ws.close();
     };
   }, [user]);
 
@@ -190,9 +187,6 @@ export default function () {
       console.log(
         `从开始至load总耗时: ${timing.loadEventEnd - timing.navigationStart}`,
       );
-      Sentry.captureMessage(
-        `白屏时间 ${timing.responseStart - timing.navigationStart}`,
-      );
     };
   }, []);
 
@@ -201,9 +195,6 @@ export default function () {
   }
 
   if (['/login', '/initialization', '/error'].includes(location.pathname)) {
-    document.title = `${
-      (config.documentTitleMap as any)[location.pathname]
-    } - 控制面板`;
     if (systemInfo?.isInitialized && location.pathname === '/initialization') {
       history.push('/crontab');
     }
@@ -217,7 +208,6 @@ export default function () {
             user,
             reloadUser,
             reloadTheme,
-            ws: ws.current,
           }}
         />
       );
@@ -230,46 +220,60 @@ export default function () {
     !navigator.userAgent.includes('Chrome');
   const isQQBrowser = navigator.userAgent.includes('QQBrowser');
 
-  const menu = (
-    <Menu
-      className="side-menu-user-drop-menu"
-      items={[{ label: '退出登录', key: 'logout', icon: <LogoutOutlined /> }]}
-      onClick={logout}
-    />
-  );
+  const menu: MenuProps = {
+    items: [
+      {
+        label: intl.get('退出登录'),
+        className: 'side-menu-user-drop-menu',
+        onClick: logout,
+        key: 'logout',
+        icon: <LogoutOutlined />,
+      },
+    ],
+  };
   return loading ? (
     <PageLoading />
   ) : (
     <ProLayout
       selectedKeys={[location.pathname]}
       loading={loading}
-      ErrorBoundary={Sentry.ErrorBoundary}
-      logo={<Image preview={false} src="http://qn.whyour.cn/logo.png" />}
-      title={
+      logo={
         <>
-          <span style={{ fontSize: 16 }}>控制面板</span>
-          <a
-            href={changeLogLink}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => {
-              e.stopPropagation();
-            }}
-          >
+          <Image preview={false} src="https://qn.whyour.cn/logo.png" />
+          <div className="title">
+            <span className="title">{intl.get('青龙')}</span>
             <span
-              style={{
-                fontSize: isFirefox ? 9 : 12,
-                color: '#666',
-                marginLeft: 2,
-                zoom: isSafari ? 0.66 : 0.8,
-                letterSpacing: isQQBrowser ? -2 : 0,
+              onClick={(e) => {
+                e.stopPropagation();
+                window.open(systemInfo?.changeLogLink, '_blank');
               }}
             >
-              v{version}
+              <Tooltip
+                title={
+                  systemInfo?.branch === 'develop'
+                    ? intl.get('开发版')
+                    : intl.get('正式版')
+                }
+              >
+                <Badge size="small" dot={systemInfo?.branch === 'develop'}>
+                  <span
+                    style={{
+                      fontSize: isFirefox ? 9 : 12,
+                      color: '#666',
+                      marginLeft: 2,
+                      zoom: isSafari ? 0.66 : 0.8,
+                      letterSpacing: isQQBrowser ? -2 : 0,
+                    }}
+                  >
+                    v{systemInfo?.version}
+                  </span>
+                </Badge>
+              </Tooltip>
             </span>
-          </a>
+          </div>
         </>
       }
+      title={false}
       menuItemRender={(menuItemProps: any, defaultDom: any) => {
         if (
           menuItemProps.isUrl ||
@@ -281,22 +285,24 @@ export default function () {
         return <Link to={menuItemProps.path}>{defaultDom}</Link>;
       }}
       pageTitleRender={(props, pageName, info) => {
-        if (info && typeof info.pageName === 'string') {
-          return `${info.pageName} - 控制面板`;
-        }
-        return '控制面板';
+        const title =
+          (config.documentTitleMap as any)[location.pathname] ||
+          intl.get('未找到');
+        return `${title} - ${intl.get('青龙')}`;
       }}
       onCollapse={setCollapsed}
       collapsed={collapsed}
       rightContentRender={() =>
         ctx.isPhone && (
-          <Dropdown overlay={menu} placement="bottomRight" trigger={['click']}>
+          <Dropdown menu={menu} placement="bottomRight" trigger={['click']}>
             <span className="side-menu-user-wrapper">
               <Avatar
                 shape="square"
                 size="small"
                 icon={<UserOutlined />}
-                src={user.avatar ? `/api/static/${user.avatar}` : ''}
+                src={
+                  user.avatar ? `${config.apiPrefix}static/${user.avatar}` : ''
+                }
               />
               <span style={{ marginLeft: 5 }}>{user.username}</span>
             </span>
@@ -312,13 +318,17 @@ export default function () {
           }}
         >
           {!collapsed && !ctx.isPhone && (
-            <Dropdown overlay={menu} placement="topLeft" trigger={['hover']}>
+            <Dropdown menu={menu} placement="topLeft" trigger={['hover']}>
               <span className="side-menu-user-wrapper">
                 <Avatar
                   shape="square"
                   size="small"
                   icon={<UserOutlined />}
-                  src={user.avatar ? `/api/static/${user.avatar}` : ''}
+                  src={
+                    user.avatar
+                      ? `${config.apiPrefix}static/${user.avatar}`
+                      : ''
+                  }
                 />
                 <span style={{ marginLeft: 5 }}>{user.username}</span>
               </span>
@@ -341,7 +351,7 @@ export default function () {
           user,
           reloadUser,
           reloadTheme,
-          socketMessage,
+          systemInfo,
         }}
       />
     </ProLayout>

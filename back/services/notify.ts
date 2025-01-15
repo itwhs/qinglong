@@ -1,12 +1,11 @@
-import { NotificationInfo } from '../data/notify';
-import { Service, Inject } from 'typedi';
-import winston from 'winston';
-import UserService from './user';
-import got from 'got';
-import nodemailer from 'nodemailer';
 import crypto from 'crypto';
+import got from 'got';
 import { HttpProxyAgent, HttpsProxyAgent } from 'hpagent';
+import nodemailer from 'nodemailer';
+import { Inject, Service } from 'typedi';
 import { parseBody, parseHeaders } from '../config/util';
+import { NotificationInfo } from '../data/notify';
+import UserService from './user';
 
 @Service()
 export default class NotificationService {
@@ -24,18 +23,28 @@ export default class NotificationService {
     ['dingtalkBot', this.dingtalkBot],
     ['weWorkBot', this.weWorkBot],
     ['weWorkApp', this.weWorkApp],
+    ['aibotk', this.aibotk],
     ['iGot', this.iGot],
     ['pushPlus', this.pushPlus],
+    ['wePlusBot', this.wePlusBot],
     ['email', this.email],
+    ['pushMe', this.pushMe],
     ['webhook', this.webhook],
+    ['lark', this.lark],
+    ['chronocat', this.chronocat],
+    ['ntfy', this.ntfy],
+    ['wxPusherBot', this.wxPusherBot],
   ]);
 
-  private timeout = 10000;
   private title = '';
   private content = '';
   private params!: Omit<NotificationInfo, 'type'>;
+  private gotOption = {
+    timeout: 10000,
+    retry: 1,
+  };
 
-  constructor(@Inject('logger') private logger: winston.Logger) { }
+  constructor() {}
 
   public async notify(
     title: string,
@@ -50,7 +59,7 @@ export default class NotificationService {
       try {
         return await notificationModeAction?.call(this);
       } catch (error: any) {
-        return false;
+        throw error;
       }
     }
     return false;
@@ -73,103 +82,166 @@ export default class NotificationService {
   }
 
   private async gotify() {
-    const { gotifyUrl, gotifyToken, gotifyPriority } = this.params;
-    const res: any = await got
-      .post(`${gotifyUrl}/message?token=${gotifyToken}`, {
-        timeout: this.timeout,
-        retry: 0,
-        body: `title=${encodeURIComponent(
-          this.title,
-        )}&message=${encodeURIComponent(
-          this.content,
-        )}&priority=${gotifyPriority}`,
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-      })
-      .json();
-    return typeof res.id === 'number';
+    const { gotifyUrl, gotifyToken, gotifyPriority = 1 } = this.params;
+    try {
+      const res: any = await got
+        .post(`${gotifyUrl}/message?token=${gotifyToken}`, {
+          ...this.gotOption,
+          body: `title=${encodeURIComponent(
+            this.title,
+          )}&message=${encodeURIComponent(
+            this.content,
+          )}&priority=${gotifyPriority}`,
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+        })
+        .json();
+      if (typeof res.id === 'number') {
+        return true;
+      } else {
+        throw new Error(JSON.stringify(res));
+      }
+    } catch (error: any) {
+      throw new Error(error.response ? error.response.body : error);
+    }
   }
 
   private async goCqHttpBot() {
     const { goCqHttpBotQq, goCqHttpBotToken, goCqHttpBotUrl } = this.params;
-    const res: any = await got
-      .post(`${goCqHttpBotUrl}?${goCqHttpBotQq}`, {
-        timeout: this.timeout,
-        retry: 0,
-        json: { message: `${this.title}\n${this.content}` },
-        headers: { Authorization: 'Bearer ' + goCqHttpBotToken },
-      })
-      .json();
-    return res.retcode === 0;
+    try {
+      const res: any = await got
+        .post(`${goCqHttpBotUrl}?${goCqHttpBotQq}`, {
+          ...this.gotOption,
+          json: { message: `${this.title}\n${this.content}` },
+          headers: { Authorization: 'Bearer ' + goCqHttpBotToken },
+        })
+        .json();
+      if (res.retcode === 0) {
+        return true;
+      } else {
+        throw new Error(JSON.stringify(res));
+      }
+    } catch (error: any) {
+      throw new Error(error.response ? error.response.body : error);
+    }
   }
 
   private async serverChan() {
     const { serverChanKey } = this.params;
-    const url = serverChanKey.startsWith('SCT')
-      ? `https://sctapi.ftqq.com/${serverChanKey}.send`
-      : `https://sc.ftqq.com/${serverChanKey}.send`;
-    const res: any = await got
-      .post(url, {
-        timeout: this.timeout,
-        retry: 0,
-        body: `title=${this.title}&desp=${this.content}`,
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      })
-      .json();
-    return res.errno === 0 || res.data.errno === 0;
+    const matchResult = serverChanKey.match(/^sctp(\d+)t/i);
+    const url =
+      matchResult && matchResult[1]
+        ? `https://${matchResult[1]}.push.ft07.com/send/${serverChanKey}.send`
+        : `https://sctapi.ftqq.com/${serverChanKey}.send`;
+
+    try {
+      const res: any = await got
+        .post(url, {
+          ...this.gotOption,
+          body: `title=${encodeURIComponent(
+            this.title,
+          )}&desp=${encodeURIComponent(this.content)}`,
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        })
+        .json();
+      if (res.errno === 0 || res.data.errno === 0) {
+        return true;
+      } else {
+        throw new Error(JSON.stringify(res));
+      }
+    } catch (error: any) {
+      throw new Error(error.response ? error.response.body : error);
+    }
   }
 
   private async pushDeer() {
-    const { pushDeerKey } = this.params;
-    const url = `https://api2.pushdeer.com/message/push`;
-    const res: any = await got
-      .post(url, {
-        timeout: this.timeout,
-        retry: 0,
-        body: `pushkey=${pushDeerKey}&text=${encodeURIComponent(
-          this.title,
-        )}&desp=${encodeURIComponent(this.content)}&type=markdown`,
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      })
-      .json();
-    return (
-      res.content.result.length !== undefined && res.content.result.length > 0
-    );
+    const { pushDeerKey, pushDeerUrl } = this.params;
+    const url = pushDeerUrl || `https://api2.pushdeer.com/message/push`;
+    try {
+      const res: any = await got
+        .post(url, {
+          ...this.gotOption,
+          body: `pushkey=${pushDeerKey}&text=${encodeURIComponent(
+            this.title,
+          )}&desp=${encodeURIComponent(this.content)}&type=markdown`,
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        })
+        .json();
+      if (
+        res.content.result.length !== undefined &&
+        res.content.result.length > 0
+      ) {
+        return true;
+      } else {
+        throw new Error(JSON.stringify(res));
+      }
+    } catch (error: any) {
+      throw new Error(error.response ? error.response.body : error);
+    }
   }
 
   private async chat() {
     const { chatUrl, chatToken } = this.params;
     const url = `${chatUrl}${chatToken}`;
-    const res: any = await got
-      .post(url, {
-        timeout: this.timeout,
-        retry: 0,
-        body: `payload={"text":"${this.title}\n${this.content}"}`,
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      })
-      .json();
-    return res.success;
+    try {
+      const res: any = await got
+        .post(url, {
+          ...this.gotOption,
+          body: `payload={"text":"${this.title}\n${this.content}"}`,
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        })
+        .json();
+      if (res.success) {
+        return true;
+      } else {
+        throw new Error(JSON.stringify(res));
+      }
+    } catch (error: any) {
+      throw new Error(error.response ? error.response.body : error);
+    }
   }
 
   private async bark() {
-    let { barkPush, barkIcon, barkSound, barkGroup } = this.params;
-    if (!barkPush.startsWith('http') && !barkPush.startsWith('https')) {
+    let {
+      barkPush,
+      barkIcon = '',
+      barkSound = '',
+      barkGroup = '',
+      barkLevel = '',
+      barkUrl = '',
+      barkArchive = '',
+    } = this.params;
+    if (!barkPush.startsWith('http')) {
       barkPush = `https://api.day.app/${barkPush}`;
     }
-    const url = `${barkPush}/${encodeURIComponent(
-      this.title,
-    )}/${encodeURIComponent(
-      this.content,
-    )}?icon=${barkIcon}?sound=${barkSound}&group=${barkGroup}`;
-    const res: any = await got
-      .get(url, {
-        timeout: this.timeout,
-        retry: 0,
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      })
-      .json();
-    return res.code === 200;
+    const url = `${barkPush}`;
+    const body = {
+      title: this.title,
+      body: this.content,
+      icon: barkIcon,
+      sound: barkSound,
+      group: barkGroup,
+      isArchive: barkArchive,
+      level: barkLevel,
+      url: barkUrl,
+    };
+    try {
+      const res: any = await got
+        .post(url, {
+          ...this.gotOption,
+          json: body,
+          headers: { 'Content-Type': 'application/json' },
+        })
+        .json();
+      if (res.code === 200) {
+        return true;
+      } else {
+        throw new Error(JSON.stringify(res));
+      }
+    } catch (error: any) {
+      throw new Error(error.response ? error.response.body : error);
+    }
   }
 
   private async telegramBot() {
@@ -182,8 +254,9 @@ export default class NotificationService {
       telegramBotUserId,
     } = this.params;
     const authStr = telegramBotProxyAuth ? `${telegramBotProxyAuth}@` : '';
-    const url = `https://${telegramBotApiHost ? telegramBotApiHost : 'api.telegram.org'
-      }/bot${telegramBotToken}/sendMessage`;
+    const url = `${
+      telegramBotApiHost ? telegramBotApiHost : 'https://api.telegram.org'
+    }/bot${telegramBotToken}/sendMessage`;
     let agent;
     if (telegramBotProxyHost && telegramBotProxyPort) {
       const options: any = {
@@ -200,16 +273,23 @@ export default class NotificationService {
         https: httpsAgent,
       };
     }
-    const res: any = await got
-      .post(url, {
-        timeout: this.timeout,
-        retry: 0,
-        body: `chat_id=${telegramBotUserId}&text=${this.title}\n\n${this.content}&disable_web_page_preview=true`,
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        agent,
-      })
-      .json();
-    return !!res.ok;
+    try {
+      const res: any = await got
+        .post(url, {
+          ...this.gotOption,
+          body: `chat_id=${telegramBotUserId}&text=${this.title}\n\n${this.content}&disable_web_page_preview=true`,
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          agent,
+        })
+        .json();
+      if (res.ok) {
+        return true;
+      } else {
+        throw new Error(JSON.stringify(res));
+      }
+    } catch (error: any) {
+      throw new Error(error.response ? error.response.body : error);
+    }
   }
 
   private async dingtalkBot() {
@@ -223,48 +303,63 @@ export default class NotificationService {
       secretParam = `&timestamp=${dateNow}&sign=${result}`;
     }
     const url = `https://oapi.dingtalk.com/robot/send?access_token=${dingtalkBotToken}${secretParam}`;
-    const res: any = await got
-      .post(url, {
-        timeout: this.timeout,
-        retry: 0,
-        json: {
-          msgtype: 'text',
-          text: {
-            content: ` ${this.title}\n\n${this.content}`,
+    try {
+      const res: any = await got
+        .post(url, {
+          ...this.gotOption,
+          json: {
+            msgtype: 'text',
+            text: {
+              content: ` ${this.title}\n\n${this.content}`,
+            },
           },
-        },
-      })
-      .json();
-    return res.errcode === 0;
+        })
+        .json();
+      if (res.errcode === 0) {
+        return true;
+      } else {
+        throw new Error(JSON.stringify(res));
+      }
+    } catch (error: any) {
+      throw new Error(error.response ? error.response.body : error);
+    }
   }
 
   private async weWorkBot() {
-    const { weWorkBotKey } = this.params;
-    const url = `https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=${weWorkBotKey}`;
-    const res: any = await got
-      .post(url, {
-        timeout: this.timeout,
-        retry: 0,
-        json: {
-          msgtype: 'text',
-          text: {
-            content: ` ${this.title}\n\n${this.content}`,
+    const { weWorkBotKey, weWorkOrigin = 'https://qyapi.weixin.qq.com' } =
+      this.params;
+    const url = `${weWorkOrigin}/cgi-bin/webhook/send?key=${weWorkBotKey}`;
+    try {
+      const res: any = await got
+        .post(url, {
+          ...this.gotOption,
+          json: {
+            msgtype: 'text',
+            text: {
+              content: ` ${this.title}\n\n${this.content}`,
+            },
           },
-        },
-      })
-      .json();
-    return res.errcode === 0;
+        })
+        .json();
+      if (res.errcode === 0) {
+        return true;
+      } else {
+        throw new Error(JSON.stringify(res));
+      }
+    } catch (error: any) {
+      throw new Error(error.response ? error.response.body : error);
+    }
   }
 
   private async weWorkApp() {
-    const { weWorkAppKey } = this.params;
+    const { weWorkAppKey, weWorkOrigin = 'https://qyapi.weixin.qq.com' } =
+      this.params;
     const [corpid, corpsecret, touser, agentid, thumb_media_id = '1'] =
       weWorkAppKey.split(',');
-    const url = `https://qyapi.weixin.qq.com/cgi-bin/gettoken`;
+    const url = `${weWorkOrigin}/cgi-bin/gettoken`;
     const tokenRes: any = await got
       .post(url, {
-        timeout: this.timeout,
-        retry: 0,
+        ...this.gotOption,
         json: {
           corpid,
           corpsecret,
@@ -310,102 +405,432 @@ export default class NotificationService {
         break;
     }
 
-    const res: any = await got
-      .post(
-        `https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token=${tokenRes.access_token}`,
-        {
-          timeout: this.timeout,
-          retry: 0,
-          json: {
-            touser,
-            agentid,
-            safe: '0',
-            ...options,
+    try {
+      const res: any = await got
+        .post(
+          `${weWorkOrigin}/cgi-bin/message/send?access_token=${tokenRes.access_token}`,
+          {
+            ...this.gotOption,
+            json: {
+              touser,
+              agentid,
+              safe: '0',
+              ...options,
+            },
           },
-        },
-      )
-      .json();
+        )
+        .json();
 
-    return res.errcode === 0;
+      if (res.errcode === 0) {
+        return true;
+      } else {
+        throw new Error(JSON.stringify(res));
+      }
+    } catch (error: any) {
+      throw new Error(error.response ? error.response.body : error);
+    }
+  }
+
+  private async aibotk() {
+    const { aibotkKey, aibotkType, aibotkName } = this.params;
+    let url = '';
+    let json = {};
+    switch (aibotkType) {
+      case 'room':
+        url = 'https://api-bot.aibotk.com/openapi/v1/chat/room';
+        json = {
+          apiKey: `${aibotkKey}`,
+          roomName: `${aibotkName}`,
+          message: {
+            type: 1,
+            content: `【青龙快讯】\n\n${this.title}\n${this.content}`,
+          },
+        };
+        break;
+      case 'contact':
+        url = 'https://api-bot.aibotk.com/openapi/v1/chat/contact';
+        json = {
+          apiKey: `${aibotkKey}`,
+          name: `${aibotkName}`,
+          message: {
+            type: 1,
+            content: `【青龙快讯】\n\n${this.title}\n${this.content}`,
+          },
+        };
+        break;
+    }
+
+    try {
+      const res: any = await got
+        .post(url, {
+          ...this.gotOption,
+          json: {
+            ...json,
+          },
+        })
+        .json();
+      if (res.code === 0) {
+        return true;
+      } else {
+        throw new Error(JSON.stringify(res));
+      }
+    } catch (error: any) {
+      throw new Error(error.response ? error.response.body : error);
+    }
   }
 
   private async iGot() {
     const { iGotPushKey } = this.params;
     const url = `https://push.hellyw.com/${iGotPushKey.toLowerCase()}`;
-    const res: any = await got
-      .post(url, {
-        timeout: this.timeout,
-        retry: 0,
-        body: `title=${this.title}&content=${this.content}`,
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      })
-      .json();
+    try {
+      const res: any = await got
+        .post(url, {
+          ...this.gotOption,
+          body: `title=${this.title}&content=${this.content}`,
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        })
+        .json();
 
-    return res.ret === 0;
+      if (res.ret === 0) {
+        return true;
+      } else {
+        throw new Error(JSON.stringify(res));
+      }
+    } catch (error: any) {
+      throw new Error(error.response ? error.response.body : error);
+    }
   }
 
   private async pushPlus() {
-    const { pushPlusToken, pushPlusUser } = this.params;
+    const {
+      pushPlusToken,
+      pushPlusUser,
+      pushplusWebhook,
+      pushPlusTemplate,
+      pushplusChannel,
+      pushplusCallbackUrl,
+      pushplusTo,
+    } = this.params;
     const url = `https://www.pushplus.plus/send`;
-    const res: any = await got
-      .post(url, {
-        timeout: this.timeout,
-        retry: 0,
+    try {
+      let body = {
+        ...this.gotOption,
         json: {
           token: `${pushPlusToken}`,
           title: `${this.title}`,
           content: `${this.content.replace(/[\n\r]/g, '<br>')}`,
           topic: `${pushPlusUser || ''}`,
+          template: `${pushPlusTemplate || 'html'}`,
+          channel: `${pushplusChannel || 'wechat'}`,
+          webhook: `${pushplusWebhook || ''}`,
+          callbackUrl: `${pushplusCallbackUrl || ''}`,
+          to: `${pushplusTo || ''}`,
         },
-      })
-      .json();
+      };
 
-    return res.code === 200;
+      const res: any = await got.post(url, body).json();
+
+      if (res.code === 200) {
+        return true;
+      } else {
+        throw new Error(JSON.stringify(res));
+      }
+    } catch (error: any) {
+      throw new Error(error.response ? error.response.body : error);
+    }
+  }
+
+  private async wePlusBot() {
+    const { wePlusBotToken, wePlusBotReceiver, wePlusBotVersion } = this.params;
+
+    let content = this.content;
+    let template = 'txt';
+    if (this.content.length > 800) {
+      template = 'html';
+      content = content.replace(/[\n\r]/g, '<br>');
+    }
+
+    const url = `https://www.weplusbot.com/send`;
+    try {
+      const res: any = await got
+        .post(url, {
+          ...this.gotOption,
+          json: {
+            token: `${wePlusBotToken}`,
+            title: `${this.title}`,
+            template: `${template}`,
+            content: `${content}`,
+            receiver: `${wePlusBotReceiver || ''}`,
+            version: `${wePlusBotVersion || 'pro'}`,
+          },
+        })
+        .json();
+
+      if (res.code === 200) {
+        return true;
+      } else {
+        throw new Error(JSON.stringify(res));
+      }
+    } catch (error: any) {
+      throw new Error(error.response ? error.response.body : error);
+    }
+  }
+
+  private async lark() {
+    let { larkKey } = this.params;
+
+    if (!larkKey.startsWith('http')) {
+      larkKey = `https://open.feishu.cn/open-apis/bot/v2/hook/${larkKey}`;
+    }
+
+    try {
+      const res: any = await got
+        .post(larkKey, {
+          ...this.gotOption,
+          json: {
+            msg_type: 'text',
+            content: { text: `${this.title}\n\n${this.content}` },
+          },
+          headers: { 'Content-Type': 'application/json' },
+        })
+        .json();
+      if (res.StatusCode === 0 || res.code === 0) {
+        return true;
+      } else {
+        throw new Error(JSON.stringify(res));
+      }
+    } catch (error: any) {
+      throw new Error(error.response ? error.response.body : error);
+    }
   }
 
   private async email() {
     const { emailPass, emailService, emailUser } = this.params;
-    const transporter = nodemailer.createTransport({
-      service: emailService,
-      auth: {
-        user: emailUser,
-        pass: emailPass,
-      },
-    });
 
-    const info = await transporter.sendMail({
-      from: `"青龙快讯" <${emailUser}>`,
-      to: `${emailUser}`,
-      subject: `${this.title}`,
-      html: `${this.content.replace(/\n/g, '<br/>')}`,
-    });
+    try {
+      const transporter = nodemailer.createTransport({
+        service: emailService,
+        auth: {
+          user: emailUser,
+          pass: emailPass,
+        },
+      });
 
-    transporter.close();
+      const info = await transporter.sendMail({
+        from: `"青龙快讯" <${emailUser}>`,
+        to: `${emailUser}`,
+        subject: `${this.title}`,
+        html: `${this.content.replace(/\n/g, '<br/>')}`,
+      });
 
-    return !!info.messageId;
+      transporter.close();
+
+      if (info.messageId) {
+        return true;
+      } else {
+        throw new Error(JSON.stringify(info));
+      }
+    } catch (error: any) {
+      throw error;
+    }
+  }
+
+  private async pushMe() {
+    const { pushMeKey, pushMeUrl } = this.params;
+    try {
+      const res: any = await got.post(pushMeUrl || 'https://push.i-i.me/', {
+        ...this.gotOption,
+        json: {
+          push_key: pushMeKey,
+          title: this.title,
+          content: this.content,
+        },
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (res.body === 'success') {
+        return true;
+      } else {
+        throw new Error(res.body);
+      }
+    } catch (error: any) {
+      throw new Error(error.response ? error.response.body : error);
+    }
+  }
+
+  private async ntfy() {
+    const { ntfyUrl, ntfyTopic, ntfyPriority } = this.params;
+    // 编码函数
+    const encodeRfc2047 = (text: string, charset: string = 'UTF-8'): string => {
+      const encodedText = Buffer.from(text).toString('base64');
+      return `=?${charset}?B?${encodedText}?=`;
+    };
+    try {
+      const encodedTitle = encodeRfc2047(this.title);
+      const res: any = await got.post(
+        `${ntfyUrl || 'https://ntfy.sh'}/${ntfyTopic}`,
+        {
+          ...this.gotOption,
+          body: `${this.content}`,
+          headers: { Title: encodedTitle, Priority: `${ntfyPriority || '3'}` },
+        },
+      );
+      if (res.statusCode === 200) {
+        return true;
+      } else {
+        throw new Error(JSON.stringify(res));
+      }
+    } catch (error: any) {
+      throw new Error(error.response ? error.response.body : error);
+    }
+  }
+
+  private async wxPusherBot() {
+    const { wxPusherBotAppToken, wxPusherBotTopicIds, wxPusherBotUids } =
+      this.params;
+    // 处理 topicIds，将分号分隔的字符串转为数组
+    const topicIds = wxPusherBotTopicIds
+      ? wxPusherBotTopicIds
+          .split(';')
+          .map((id) => id.trim())
+          .filter((id) => id)
+          .map((id) => parseInt(id))
+      : [];
+
+    // 处理 uids，将分号分隔的字符串转为数组
+    const uids = wxPusherBotUids
+      ? wxPusherBotUids
+          .split(';')
+          .map((uid) => uid.trim())
+          .filter((uid) => uid)
+      : [];
+
+    // topic_ids 和 uids 至少要有一个
+    if (!topicIds.length && !uids.length) {
+      throw new Error('wxPusher 服务的 TopicIds 和 Uids 至少配置一个才行');
+    }
+
+    const url = `https://wxpusher.zjiecode.com/api/send/message`;
+    try {
+      const res: any = await got
+        .post(url, {
+          ...this.gotOption,
+          json: {
+            appToken: wxPusherBotAppToken,
+            content: `<h1>${this.title}</h1><br/><div style='white-space: pre-wrap;'>${this.content}</div>`,
+            summary: this.title,
+            contentType: 2,
+            topicIds: topicIds,
+            uids: uids,
+            verifyPayType: 0,
+          },
+        })
+        .json();
+
+      if (res.code === 1000) {
+        return true;
+      } else {
+        throw new Error(JSON.stringify(res));
+      }
+    } catch (error: any) {
+      throw new Error(error.response ? error.response.body : error);
+    }
+  }
+
+  private async chronocat() {
+    const { chronocatURL, chronocatQQ, chronocatToken } = this.params;
+    try {
+      const user_ids = chronocatQQ
+        .match(/user_id=(\d+)/g)
+        ?.map((match: any) => match.split('=')[1]);
+      const group_ids = chronocatQQ
+        .match(/group_id=(\d+)/g)
+        ?.map((match: any) => match.split('=')[1]);
+
+      const url = `${chronocatURL}/api/message/send`;
+      const headers = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${chronocatToken}`,
+      };
+
+      for (const [chat_type, ids] of [
+        [1, user_ids],
+        [2, group_ids],
+      ]) {
+        if (!ids) {
+          continue;
+        }
+        let _ids: any = ids;
+        for (const chat_id of _ids) {
+          const data = {
+            peer: {
+              chatType: chat_type,
+              peerUin: chat_id,
+            },
+            elements: [
+              {
+                elementType: 1,
+                textElement: {
+                  content: `${this.title}\n\n${this.content}`,
+                },
+              },
+            ],
+          };
+          const res: any = await got.post(url, {
+            ...this.gotOption,
+            json: data,
+            headers,
+          });
+          if (res.statusCode === 200) {
+            return true;
+          } else {
+            throw new Error(res.body);
+          }
+        }
+      }
+      return false;
+    } catch (error: any) {
+      throw new Error(error.response ? error.response.body : error);
+    }
   }
 
   private async webhook() {
-    const { webhookUrl, webhookBody, webhookHeaders, webhookMethod, webhookContentType } =
-      this.params;
+    const {
+      webhookUrl,
+      webhookBody,
+      webhookHeaders,
+      webhookMethod,
+      webhookContentType,
+    } = this.params;
 
-    const { formatBody, formatUrl } = this.formatNotifyContent(webhookUrl, webhookBody);
-    if (!formatUrl && !formatBody) { 
-      return false;
+    if (!webhookUrl.includes('$title') && !webhookBody.includes('$title')) {
+      throw new Error('Url 或者 Body 中必须包含 $title');
     }
+
     const headers = parseHeaders(webhookHeaders);
-    const body = parseBody(formatBody, webhookContentType);
+    const body = parseBody(webhookBody, webhookContentType, (v) =>
+      v?.replaceAll('$title', this.title)?.replaceAll('$content', this.content),
+    );
     const bodyParam = this.formatBody(webhookContentType, body);
     const options = {
       method: webhookMethod,
       headers,
-      timeout: this.timeout,
-      retry: 0,
+      ...this.gotOption,
       allowGetBody: true,
-      ...bodyParam
+      ...bodyParam,
+    };
+    try {
+      const formatUrl = webhookUrl
+        ?.replaceAll('$title', encodeURIComponent(this.title))
+        ?.replaceAll('$content', encodeURIComponent(this.content));
+      const res = await got(formatUrl, options);
+      if (String(res.statusCode).startsWith('20')) {
+        return true;
+      } else {
+        throw new Error(JSON.stringify(res));
+      }
+    } catch (error: any) {
+      throw new Error(error.response ? error.response.body : error);
     }
-    const res = await got(formatUrl, options);
-    return String(res.statusCode).startsWith('20');
   }
 
   private formatBody(contentType: string, body: any): object {
@@ -416,19 +841,9 @@ export default class NotificationService {
       case 'multipart/form-data':
         return { form: body };
       case 'application/x-www-form-urlencoded':
+      case 'text/plain':
         return { body };
     }
     return {};
-  }
-
-  private formatNotifyContent(url: string, body: string) {
-    if (!url.includes('$title') && !body.includes('$title')) {
-      return {};
-    }
-
-    return {
-      formatUrl: url.replaceAll('$title', encodeURIComponent(this.title)).replaceAll('$content', encodeURIComponent(this.content)),
-      formatBody: body.replaceAll('$title', this.title).replaceAll('$content', this.content),
-    }
   }
 }

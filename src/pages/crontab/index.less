@@ -4,14 +4,16 @@
 
 .crontab-detail {
   .card-wrapper {
-    height: 80vh;
-    height: calc(80vh - var(--vh-offset, 0px));
-
     .ant-card:last-child {
       .ant-card-body {
-        height: calc(80vh - 238px);
-        height: calc(80vh - var(--vh-offset, 0px) - 238px);
+        min-height: 0;
+        height: calc(80vh - 314px);
+        height: calc(80vh - var(--vh-offset, 0px) - 314px);
         overflow-y: auto;
+
+        > div {
+          height: 100%;
+        }
       }
     }
   }
@@ -19,6 +21,9 @@
   .ant-modal-body {
     background: #eee;
     padding: 12px;
+    max-height: calc(80vh - 57px);
+    max-height: calc(80vh - var(--vh-offset, 57px));
+    word-wrap: unset;
   }
 
   .ant-card-body {
@@ -33,7 +38,7 @@
     overflow: auto;
 
     .ant-card-body {
-      min-width: 600px;
+      min-width: 1000px;
     }
 
     .cron-detail-info-item {
@@ -56,7 +61,7 @@
     .ant-card-body {
       display: flex;
       justify-content: space-between;
-      min-width: 600px;
+      min-width: 1000px;
     }
   }
 
@@ -76,7 +81,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-right: 32px;
+    gap: 24px;
 
     .operations {
       display: flex;
@@ -92,7 +97,7 @@
 .log-item {
   cursor: pointer;
   &:hover {
-    background: #fafafa;
+    background: #f2f2f2;
   }
 }
 
@@ -158,7 +163,7 @@
 .view-create-modal-sorts {
   display: flex;
 
-  .ant-space-item:nth-child(2) {
+  .ant-space-item:nth-child(1) {
     flex: 1;
   }
 }
@@ -175,4 +180,23 @@ tr.drop-over-upward td {
   .ant-modal-body {
     padding-top: 10px;
   }
+}
+
+.view-filters-container.active {
+  .filter-item > div > .ant-form-item-control {
+    margin-left: 40px;
+    width: calc(100% - 40px);
+  }
+}
+
+body[data-mode='desktop'] {
+  .crontab-wrapper {
+    tbody .ant-table-cell {
+      height: 69px !important;
+    }
+  }
+}
+
+.cron.pinned-cron > td {
+  background: #f2f2f2;
 }

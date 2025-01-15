@@ -1,14 +1,20 @@
 import { Service, Inject } from 'typedi';
 import winston from 'winston';
 import { CrontabView, CrontabViewModel } from '../data/cronView';
-import { initEnvPosition } from '../data/env';
+import {
+  initPosition,
+  maxPosition,
+  minPosition,
+  stepPosition,
+} from '../data/env';
+import { FindOptions } from 'sequelize';
 
 @Service()
 export default class CronViewService {
   constructor(@Inject('logger') private logger: winston.Logger) {}
 
   public async create(payload: CrontabView): Promise<CrontabView> {
-    let position = initEnvPosition;
+    let position = initPosition;
     const views = await this.list();
     if (views && views.length > 0 && views[views.length - 1].position) {
       position = views[views.length - 1].position as number;
@@ -16,6 +22,8 @@ export default class CronViewService {
     position = position / 2;
     const tab = new CrontabView({ ...payload, position });
     const doc = await this.insert(tab);
+
+    await this.checkPosition(tab.position!);
     return doc;
   }
 
@@ -24,7 +32,9 @@ export default class CronViewService {
   }
 
   public async update(payload: CrontabView): Promise<CrontabView> {
-    const newDoc = await this.updateDb(payload);
+    const doc = await this.getDb({ id: payload.id });
+    const tab = new CrontabView({ ...doc, ...payload });
+    const newDoc = await this.updateDb(tab);
     return newDoc;
   }
 
@@ -49,9 +59,14 @@ export default class CronViewService {
     }
   }
 
-  public async getDb(query: any): Promise<CrontabView> {
+  public async getDb(
+    query: FindOptions<CrontabView>['where'],
+  ): Promise<CrontabView> {
     const doc: any = await CrontabViewModel.findOne({ where: { ...query } });
-    return doc && (doc.get({ plain: true }) as CrontabView);
+    if (!doc) {
+      throw new Error(`CronView ${JSON.stringify(query)} not found`);
+    }
+    return doc.get({ plain: true });
   }
 
   public async disabled(ids: number[]) {
@@ -60,6 +75,22 @@ export default class CronViewService {
 
   public async enabled(ids: number[]) {
     await CrontabViewModel.update({ isDisabled: 0 }, { where: { id: ids } });
+  }
+
+  private async checkPosition(position: number) {
+    const precisionPosition = parseFloat(position.toPrecision(16));
+    if (precisionPosition < minPosition || precisionPosition > maxPosition) {
+      const envs = await this.list();
+      let position = initPosition;
+      for (const env of envs) {
+        position = position - stepPosition;
+        await this.updateDb({ id: env.id, position });
+      }
+    }
+  }
+
+  private getPrecisionPosition(position: number): number {
+    return parseFloat(position.toPrecision(16));
   }
 
   public async move({
@@ -85,8 +116,10 @@ export default class CronViewService {
     }
     const newDoc = await this.update({
       id,
-      position: targetPosition,
+      position: this.getPrecisionPosition(targetPosition),
     });
+
+    await this.checkPosition(targetPosition);
     return newDoc;
   }
 }

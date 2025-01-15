@@ -1,3 +1,4 @@
+import intl from 'react-intl-universal';
 import { useState, useEffect, useCallback, Key, useRef } from 'react';
 import {
   TreeSelect,
@@ -11,6 +12,7 @@ import {
   Dropdown,
   Menu,
   Empty,
+  MenuProps,
 } from 'antd';
 import config from '@/utils/config';
 import { PageContainer } from '@ant-design/pro-layout';
@@ -18,7 +20,7 @@ import Editor from '@monaco-editor/react';
 import { request } from '@/utils/http';
 import styles from './index.module.less';
 import EditModal from './editModal';
-import { Controlled as CodeMirror } from 'react-codemirror2';
+import CodeMirror from '@uiw/react-codemirror';
 import SplitPane from 'react-split-pane';
 import {
   DeleteOutlined,
@@ -35,25 +37,21 @@ import EditScriptNameModal from './editNameModal';
 import debounce from 'lodash/debounce';
 import { history, useOutletContext, useLocation } from '@umijs/max';
 import { parse } from 'query-string';
-import { depthFirstSearch } from '@/utils';
+import { depthFirstSearch, findNode, getEditorMode } from '@/utils';
 import { SharedContext } from '@/layouts';
 import useFilterTreeData from '@/hooks/useFilterTreeData';
-import { uniq } from 'lodash';
-
+import uniq from 'lodash/uniq';
+import IconFont from '@/components/iconfont';
+import RenameModal from './renameModal';
+import { langs } from '@uiw/codemirror-extensions-langs';
+import { useHotkeys } from 'react-hotkeys-hook';
+import prettyBytes from 'pretty-bytes';
 const { Text } = Typography;
 
-const LangMap: any = {
-  '.py': 'python',
-  '.js': 'javascript',
-  '.sh': 'shell',
-  '.ts': 'typescript',
-};
-
 const Script = () => {
-  const { headerStyle, isPhone, theme, socketMessage } =
-    useOutletContext<SharedContext>();
-  const [value, setValue] = useState('请选择脚本文件');
-  const [select, setSelect] = useState<string>('');
+  const { headerStyle, isPhone, theme } = useOutletContext<SharedContext>();
+  const [value, setValue] = useState(intl.get('请选择脚本文件'));
+  const [select, setSelect] = useState<string>(intl.get('请选择脚本文件'));
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState('');
@@ -64,28 +62,31 @@ const Script = () => {
   const [isEditing, setIsEditing] = useState(false);
   const editorRef = useRef<any>(null);
   const [isAddFileModalVisible, setIsAddFileModalVisible] = useState(false);
+  const [isRenameFileModalVisible, setIsRenameFileModalVisible] =
+    useState(false);
   const [currentNode, setCurrentNode] = useState<any>();
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
 
-  const getScripts = () => {
-    setLoading(true);
+  const getScripts = (needLoading: boolean = true) => {
+    needLoading && setLoading(true);
     request
       .get(`${config.apiPrefix}scripts`)
       .then(({ code, data }) => {
         if (code === 200) {
           setData(data);
-          initGetScript();
+          initState();
+          initGetScript(data);
         }
       })
-      .finally(() => setLoading(false));
+      .finally(() => needLoading && setLoading(false));
   };
 
   const getDetail = (node: any) => {
     request
       .get(
-        `${config.apiPrefix}scripts/${encodeURIComponent(node.title)}?path=${
-          node.parent || ''
-        }`,
+        `${config.apiPrefix}scripts/detail?file=${encodeURIComponent(
+          node.title,
+        )}&path=${node.parent || ''}`,
       )
       .then(({ code, data }) => {
         if (code === 200) {
@@ -94,7 +95,7 @@ const Script = () => {
       });
   };
 
-  const initGetScript = () => {
+  const initGetScript = (_data: any) => {
     const { p, s } = parse(history.location.search);
     if (s) {
       const vkey = `${p}/${s}`;
@@ -105,39 +106,47 @@ const Script = () => {
           parent: p,
         },
       };
-      setExpandedKeys([p]);
-      onTreeSelect([vkey], obj);
+      const item = findNode(_data, (c) => c.key === obj.node.key);
+      if (item) {
+        obj.node = item;
+        setExpandedKeys([p as string]);
+        onTreeSelect([vkey], obj);
+      }
     }
   };
 
   const onSelect = (value: any, node: any) => {
-    setSelect(node.key);
-    setCurrentNode(node);
-
     if (node.key === select || !value) {
       return;
     }
 
+    setSelect(node.key);
+    setCurrentNode(node);
+
     if (node.type === 'directory') {
-      setValue('请选择脚本文件');
+      setValue(intl.get('请选择脚本文件'));
       return;
     }
 
-    const newMode = value ? LangMap[value.slice(-3)] : '';
+    const newMode = getEditorMode(value);
     setMode(isPhone && newMode === 'typescript' ? 'javascript' : newMode);
-    setValue('加载中...');
+    setValue(intl.get('加载中...'));
     getDetail(node);
   };
 
   const onTreeSelect = useCallback(
     (keys: Key[], e: any) => {
+      const node = e.node;
+      if (node.key === select && isEditing) {
+        return;
+      }
       const content = editorRef.current
         ? editorRef.current.getValue().replace(/\r\n/g, '\n')
         : value;
       if (content !== value) {
         Modal.confirm({
           title: `确认离开`,
-          content: <>当前修改未保存，确定离开吗</>,
+          content: <>{intl.get('当前修改未保存，确定离开吗')}</>,
           onOk() {
             onSelect(keys[0], e.node);
             setIsEditing(false);
@@ -151,7 +160,7 @@ const Script = () => {
         onSelect(keys[0], e.node);
       }
     },
-    [value],
+    [value, select, isEditing],
   );
 
   const onSearch = useCallback(
@@ -183,6 +192,14 @@ const Script = () => {
     setExpandedKeys(expKeys);
   };
 
+  const onDoubleClick = (e: any, node: any) => {
+    if (node.type === 'file') {
+      setSelect(node.key);
+      setCurrentNode(node);
+      setIsEditing(true);
+    }
+  };
+
   const editFile = () => {
     setTimeout(() => {
       setIsEditing(true);
@@ -191,7 +208,7 @@ const Script = () => {
 
   const cancelEdit = () => {
     setIsEditing(false);
-    setValue('加载中...');
+    setValue(intl.get('加载中...'));
     getDetail(currentNode);
   };
 
@@ -200,11 +217,12 @@ const Script = () => {
       title: `确认保存`,
       content: (
         <>
-          确认保存文件
+          {intl.get('确认保存文件')}
           <Text style={{ wordBreak: 'break-all' }} type="warning">
+            {' '}
             {currentNode.title}
-          </Text>{' '}
-          ，保存后不可恢复
+          </Text>
+          {intl.get('，保存后不可恢复')}
         </>
       ),
       onOk() {
@@ -214,11 +232,9 @@ const Script = () => {
         return new Promise((resolve, reject) => {
           request
             .put(`${config.apiPrefix}scripts`, {
-              data: {
-                filename: currentNode.title,
-                path: currentNode.parent || '',
-                content,
-              },
+              filename: currentNode.title,
+              path: currentNode.parent || '',
+              content,
             })
             .then(({ code, data }) => {
               if (code === 200) {
@@ -242,12 +258,14 @@ const Script = () => {
       title: `确认删除`,
       content: (
         <>
-          确认删除
+          {intl.get('确认删除')}
           <Text style={{ wordBreak: 'break-all' }} type="warning">
-            {select}
+            {' '}
+            {select}{' '}
           </Text>
-          文件{currentNode.type === 'directory' ? '夹及其子文件' : ''}
-          ，删除后不可恢复
+          {intl.get('文件')}
+          {currentNode.type === 'directory' ? intl.get('夹及其子文件') : ''}
+          {intl.get('，删除后不可恢复')}
         </>
       ),
       onOk() {
@@ -287,6 +305,15 @@ const Script = () => {
     });
   };
 
+  const renameFile = () => {
+    setIsRenameFileModalVisible(true);
+  };
+
+  const handleRenameFileCancel = () => {
+    setIsRenameFileModalVisible(false);
+    getScripts(false);
+  };
+
   const addFile = () => {
     setIsAddFileModalVisible(true);
   };
@@ -323,9 +350,7 @@ const Script = () => {
   const downloadFile = () => {
     request
       .post(`${config.apiPrefix}scripts/download`, {
-        data: {
-          filename: currentNode.title,
-        },
+        filename: currentNode.title,
       })
       .then(({ code, data }) => {
         if (code === 200) {
@@ -342,9 +367,9 @@ const Script = () => {
   };
 
   const initState = () => {
-    setSelect('');
+    setSelect(intl.get('请选择脚本文件'));
     setCurrentNode(null);
-    setValue('请选择脚本文件');
+    setValue(intl.get('请选择脚本文件'));
   };
 
   useEffect(() => {
@@ -353,9 +378,49 @@ const Script = () => {
 
   useEffect(() => {
     if (treeDom.current) {
-      setHeight(treeDom.current.clientHeight);
+      setHeight(treeDom.current.clientHeight - 6);
     }
   }, [treeDom.current, data]);
+
+  useHotkeys(
+    'mod+s',
+    (e) => {
+      if (isEditing) {
+        saveFile();
+      }
+    },
+    { enableOnFormTags: ['textarea'], preventDefault: true },
+  );
+
+  useHotkeys(
+    'mod+d',
+    (e) => {
+      if (currentNode.title) {
+        deleteFile();
+      }
+    },
+    { preventDefault: true },
+  );
+
+  useHotkeys(
+    'mod+o',
+    (e) => {
+      if (!isEditing) {
+        addFile();
+      }
+    },
+    { preventDefault: true },
+  );
+
+  useHotkeys(
+    'mod+e',
+    (e) => {
+      if (currentNode.title) {
+        cancelEdit();
+      }
+    },
+    { preventDefault: true },
+  );
 
   const action = (key: string | number) => {
     switch (key) {
@@ -372,7 +437,7 @@ const Script = () => {
 
   const menuAction = (key: string | number) => {
     switch (key) {
-      case 'save':
+      case 'add':
         addFile();
         break;
       case 'edit':
@@ -381,50 +446,74 @@ const Script = () => {
       case 'delete':
         deleteFile();
         break;
+      case 'rename':
+        renameFile();
+        break;
       default:
         break;
     }
   };
 
-  const menu = isEditing ? (
-    <Menu
-      items={[
-        { label: '保存', key: 'save', icon: <PlusOutlined /> },
-        { label: '退出编辑', key: 'exit', icon: <EditOutlined /> },
-      ]}
-      onClick={({ key, domEvent }) => {
-        domEvent.stopPropagation();
-        action(key);
-      }}
-    />
-  ) : (
-    <Menu
-      items={[
-        { label: '新建', key: 'add', icon: <PlusOutlined /> },
-        {
-          label: '编辑',
-          key: 'edit',
-          icon: <EditOutlined />,
-          disabled: !select,
+  const menu: MenuProps = isEditing
+    ? {
+        items: [
+          { label: intl.get('保存'), key: 'save', icon: <PlusOutlined /> },
+          { label: intl.get('退出编辑'), key: 'exit', icon: <EditOutlined /> },
+        ],
+        onClick: ({ key, domEvent }) => {
+          domEvent.stopPropagation();
+          action(key);
         },
-        {
-          label: '删除',
-          key: 'delete',
-          icon: <DeleteOutlined />,
-          disabled: !select,
+      }
+    : {
+        items: [
+          { label: intl.get('创建'), key: 'add', icon: <PlusOutlined /> },
+          {
+            label: intl.get('编辑'),
+            key: 'edit',
+            icon: <EditOutlined />,
+            disabled: !select,
+          },
+          {
+            label: intl.get('重命名'),
+            key: 'rename',
+            icon: <IconFont type="ql-icon-rename" />,
+            disabled: !select,
+          },
+          {
+            label: intl.get('删除'),
+            key: 'delete',
+            icon: <DeleteOutlined />,
+            disabled: !select,
+          },
+        ],
+        onClick: ({ key, domEvent }) => {
+          domEvent.stopPropagation();
+          menuAction(key);
         },
-      ]}
-      onClick={({ key, domEvent }) => {
-        domEvent.stopPropagation();
-        menuAction(key);
-      }}
-    />
-  );
+      };
 
   return (
     <PageContainer
       className="ql-container-wrapper log-wrapper"
-      title={select}
+      title={
+        <>
+          {select}
+          {currentNode?.type === 'file' && (
+            <span
+              style={{
+                marginLeft: 6,
+                fontSize: 12,
+                color: '#999',
+                display: 'inline-block',
+                height: 14,
+              }}
+            >
+              {prettyBytes(currentNode.size)}
+            </span>
+          )}
+        </>
+      }
       loading={loading}
       extra={
         isPhone
@@ -435,35 +524,35 @@ const Script = () => {
                 value={select}
                 dropdownStyle={{ maxHeight: 400, overflow: 'auto' }}
                 treeData={data}
-                placeholder="请选择脚本"
+                placeholder={intl.get('请选择脚本')}
                 fieldNames={{ value: 'key' }}
                 treeNodeFilterProp="title"
                 showSearch
                 allowClear
                 onSelect={onSelect}
               />,
-              <Dropdown overlay={menu} trigger={['click']}>
+              <Dropdown menu={menu} trigger={['click']}>
                 <Button type="primary" icon={<EllipsisOutlined />} />
               </Dropdown>,
             ]
           : isEditing
           ? [
               <Button type="primary" onClick={saveFile}>
-                保存
+                {intl.get('保存')}
               </Button>,
               <Button type="primary" onClick={cancelEdit}>
-                退出编辑
+                {intl.get('退出编辑')}
               </Button>,
             ]
           : [
-              <Tooltip title="新建">
+              <Tooltip title={intl.get('创建')}>
                 <Button
                   type="primary"
                   onClick={addFile}
                   icon={<PlusOutlined />}
                 />
               </Tooltip>,
-              <Tooltip title="编辑">
+              <Tooltip title={intl.get('编辑')}>
                 <Button
                   disabled={!select}
                   type="primary"
@@ -471,7 +560,15 @@ const Script = () => {
                   icon={<EditOutlined />}
                 />
               </Tooltip>,
-              <Tooltip title="删除">
+              <Tooltip title={intl.get('重命名')}>
+                <Button
+                  disabled={!select}
+                  type="primary"
+                  onClick={renameFile}
+                  icon={<IconFont type="ql-icon-rename" />}
+                />
+              </Tooltip>,
+              <Tooltip title={intl.get('删除')}>
                 <Button
                   type="primary"
                   disabled={!select}
@@ -485,7 +582,7 @@ const Script = () => {
                   setIsLogModalVisible(true);
                 }}
               >
-                调试
+                {intl.get('调试')}
               </Button>,
             ]
       }
@@ -503,7 +600,7 @@ const Script = () => {
                   <Input.Search
                     className={styles['left-tree-search']}
                     onChange={onSearch}
-                    placeholder="请输入脚本名"
+                    placeholder={intl.get('请输入脚本名')}
                     allowClear
                   ></Input.Search>
                   <div className={styles['left-tree-scroller']} ref={treeDom}>
@@ -518,6 +615,7 @@ const Script = () => {
                       onExpand={onExpand}
                       showLine={{ showLeafIcon: true }}
                       onSelect={onTreeSelect}
+                      onDoubleClick={onDoubleClick}
                     ></Tree>
                   </div>
                 </>
@@ -531,7 +629,7 @@ const Script = () => {
                   }}
                 >
                   <Empty
-                    description="暂无脚本"
+                    description={intl.get('暂无脚本')}
                     image={Empty.PRESENTED_IMAGE_SIMPLE}
                   />
                 </div>
@@ -546,6 +644,7 @@ const Script = () => {
                 fontSize: 12,
                 lineNumbersMinChars: 3,
                 glyphMargin: false,
+                accessibilitySupport: 'off',
               }}
               onMount={(editor) => {
                 editorRef.current = editor;
@@ -556,34 +655,36 @@ const Script = () => {
         {isPhone && (
           <CodeMirror
             value={value}
-            options={{
-              lineNumbers: true,
-              lineWrapping: true,
-              styleActiveLine: true,
-              matchBrackets: true,
-              mode,
-              readOnly: !isEditing,
-            }}
-            onBeforeChange={(editor, data, value) => {
+            extensions={
+              mode ? [langs[mode as keyof typeof langs]()] : undefined
+            }
+            theme={theme.includes('dark') ? 'dark' : 'light'}
+            readOnly={!isEditing}
+            onChange={(value) => {
               setValue(value);
             }}
-            onChange={(editor, data, value) => {}}
           />
         )}
-        <EditModal
-          visible={isLogModalVisible}
-          treeData={data}
-          currentNode={currentNode}
-          content={value}
-          socketMessage={socketMessage}
-          handleCancel={() => {
-            setIsLogModalVisible(false);
-          }}
-        />
+        {isLogModalVisible && (
+          <EditModal
+            visible={isLogModalVisible}
+            treeData={data}
+            currentNode={currentNode}
+            content={value}
+            handleCancel={() => {
+              setIsLogModalVisible(false);
+            }}
+          />
+        )}
         <EditScriptNameModal
           visible={isAddFileModalVisible}
           treeData={data}
           handleCancel={addFileModalClose}
+        />
+        <RenameModal
+          visible={isRenameFileModalVisible}
+          handleCancel={handleRenameFileCancel}
+          currentNode={currentNode}
         />
       </div>
     </PageContainer>

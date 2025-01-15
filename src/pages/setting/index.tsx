@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import intl from 'react-intl-universal';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Button,
   InputNumber,
@@ -17,7 +18,6 @@ import {
 import config from '@/utils/config';
 import { PageContainer } from '@ant-design/pro-layout';
 import { request } from '@/utils/http';
-import * as DarkReader from '@umijs/ssr-darkreader';
 import AppModal from './appModal';
 import {
   EditOutlined,
@@ -27,33 +27,38 @@ import {
 import SecuritySettings from './security';
 import LoginLog from './loginLog';
 import NotificationSetting from './notification';
-import CheckUpdate from './checkUpdate';
+import Other from './other';
 import About from './about';
 import { useOutletContext } from '@umijs/max';
 import { SharedContext } from '@/layouts';
+import './index.less';
+import useResizeObserver from '@react-hook/resize-observer';
+import SystemLog from './systemLog';
+import Dependence from './dependence';
 
 const { Text } = Typography;
-const optionsWithDisabled = [
-  { label: '亮色', value: 'light' },
-  { label: '暗色', value: 'dark' },
-  { label: '跟随系统', value: 'auto' },
-];
+const isDemoEnv = window.__ENV__DeployEnv === 'demo';
 
 const Setting = () => {
-  const { headerStyle, isPhone, user, reloadUser, reloadTheme, socketMessage } =
-    useOutletContext<SharedContext>();
+  const {
+    headerStyle,
+    isPhone,
+    user,
+    theme,
+    reloadUser,
+    reloadTheme,
+    systemInfo,
+  } = useOutletContext<SharedContext>();
   const columns = [
     {
-      title: '名称',
+      title: intl.get('名称'),
       dataIndex: 'name',
       key: 'name',
-      align: 'center' as const,
     },
     {
       title: 'Client ID',
       dataIndex: 'client_id',
       key: 'client_id',
-      align: 'center' as const,
       render: (text: string, record: any) => {
         return <Text copyable>{record.client_id}</Text>;
       },
@@ -62,41 +67,47 @@ const Setting = () => {
       title: 'Client Secret',
       dataIndex: 'client_secret',
       key: 'client_secret',
-      align: 'center' as const,
       render: (text: string, record: any) => {
         return <Text copyable={{ text: record.client_secret }}>*******</Text>;
       },
     },
     {
-      title: '权限',
+      title: intl.get('权限'),
       dataIndex: 'scopes',
       key: 'scopes',
-      align: 'center' as const,
+      width: 500,
       render: (text: string, record: any) => {
-        return record.scopes.map((scope: any) => {
-          return <Tag key={scope}>{(config.scopesMap as any)[scope]}</Tag>;
-        });
+        return (
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {record.scopes.map((scope: any) => {
+              return (
+                <Tag style={{ marginRight: 0 }} key={scope}>
+                  {(config.scopesMap as any)[scope]}
+                </Tag>
+              );
+            })}
+          </div>
+        );
       },
     },
     {
-      title: '操作',
+      title: intl.get('操作'),
       key: 'action',
-      align: 'center' as const,
       render: (text: string, record: any, index: number) => {
         const isPc = !isPhone;
         return (
           <Space size="middle" style={{ paddingLeft: 8 }}>
-            <Tooltip title={isPc ? '编辑' : ''}>
+            <Tooltip title={isPc ? intl.get('编辑') : ''}>
               <a onClick={() => editApp(record, index)}>
                 <EditOutlined />
               </a>
             </Tooltip>
-            <Tooltip title={isPc ? '重置secret' : ''}>
+            <Tooltip title={isPc ? intl.get('重置secret') : ''}>
               <a onClick={() => resetSecret(record, index)}>
                 <ReloadOutlined />
               </a>
             </Tooltip>
-            <Tooltip title={isPc ? '删除' : ''}>
+            <Tooltip title={isPc ? intl.get('删除') : ''}>
               <a onClick={() => deleteApp(record, index)}>
                 <DeleteOutlined />
               </a>
@@ -108,37 +119,21 @@ const Setting = () => {
   ];
 
   const [loading, setLoading] = useState(true);
-  const defaultTheme = localStorage.getItem('qinglong_dark_theme') || 'auto';
   const [dataSource, setDataSource] = useState<any[]>([]);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [editedApp, setEditedApp] = useState<any>();
   const [tabActiveKey, setTabActiveKey] = useState('security');
   const [loginLogData, setLoginLogData] = useState<any[]>([]);
   const [notificationInfo, setNotificationInfo] = useState<any>();
-  const [logRemoveFrequency, setLogRemoveFrequency] = useState<number>();
-  const [form] = Form.useForm();
-  const {
-    enable: enableDarkMode,
-    disable: disableDarkMode,
-    exportGeneratedCSS: collectCSS,
-    setFetchMethod,
-    auto: followSystemColorScheme,
-  } = DarkReader || {};
+  const containergRef = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState<number>(0);
 
-  const themeChange = (e: any) => {
-    const _theme = e.target.value;
-    localStorage.setItem('qinglong_dark_theme', e.target.value);
-    setFetchMethod(fetch);
-
-    if (_theme === 'dark') {
-      enableDarkMode({});
-    } else if (_theme === 'light') {
-      disableDarkMode();
-    } else {
-      followSystemColorScheme({});
+  useResizeObserver(containergRef, (entry) => {
+    const _height = (entry.target as HTMLElement)?.offsetHeight;
+    if (_height && height !== _height - 101) {
+      setHeight(_height - 101);
     }
-    reloadTheme();
-  };
+  });
 
   const getApps = () => {
     setLoading(true);
@@ -164,14 +159,14 @@ const Setting = () => {
 
   const deleteApp = (record: any, index: number) => {
     Modal.confirm({
-      title: '确认删除',
+      title: intl.get('确认删除'),
       content: (
         <>
-          确认删除应用{' '}
+          {intl.get('确认删除应用')}{' '}
           <Text style={{ wordBreak: 'break-all' }} type="warning">
             {record.name}
           </Text>{' '}
-          吗
+          {intl.get('吗')}
         </>
       ),
       onOk() {
@@ -179,7 +174,7 @@ const Setting = () => {
           .delete(`${config.apiPrefix}apps`, { data: [record.id] })
           .then(({ code, data }) => {
             if (code === 200) {
-              message.success('删除成功');
+              message.success(intl.get('删除成功'));
               const result = [...dataSource];
               result.splice(index, 1);
               setDataSource(result);
@@ -194,16 +189,18 @@ const Setting = () => {
 
   const resetSecret = (record: any, index: number) => {
     Modal.confirm({
-      title: '确认重置',
+      title: intl.get('确认重置'),
       content: (
         <>
-          确认重置应用{' '}
+          {intl.get('确认重置应用')}{' '}
           <Text style={{ wordBreak: 'break-all' }} type="warning">
             {record.name}
           </Text>{' '}
-          的Secret吗
+          {intl.get('的Secret吗')}
           <br />
-          <Text type="secondary">重置Secret会让当前应用所有token失效</Text>
+          <Text type="secondary">
+            {intl.get('重置Secret会让当前应用所有token失效')}
+          </Text>
         </>
       ),
       onOk() {
@@ -211,7 +208,7 @@ const Setting = () => {
           .put(`${config.apiPrefix}apps/${record.id}/reset-secret`)
           .then(({ code, data }) => {
             if (code === 200) {
-              message.success('重置成功');
+              message.success(intl.get('重置成功'));
               handleApp(data);
             }
           });
@@ -263,8 +260,6 @@ const Setting = () => {
       getLoginLog();
     } else if (activeKey === 'notification') {
       getNotification();
-    } else if (activeKey === 'other') {
-      getLogRemoveFrequency();
     }
   };
 
@@ -281,41 +276,16 @@ const Setting = () => {
       });
   };
 
-  const getLogRemoveFrequency = () => {
-    request
-      .get(`${config.apiPrefix}system/log/remove`)
-      .then(({ code, data }) => {
-        if (code === 200 && data.info) {
-          const { frequency } = data.info;
-          setLogRemoveFrequency(frequency);
-        }
-      })
-      .catch((error: any) => {
-        console.log(error);
-      });
-  };
-
-  const updateRemoveLogFrequency = () => {
-    setTimeout(() => {
-      request
-        .put(`${config.apiPrefix}system/log/remove`, {
-          data: { frequency: logRemoveFrequency },
-        })
-        .then(({ code, data }) => {
-          if (code === 200) {
-            message.success('更新成功');
-          }
-        })
-        .catch((error: any) => {
-          console.log(error);
-        });
-    });
-  };
+  useEffect(() => {
+    if (isDemoEnv) {
+      getApps();
+    }
+  }, []);
 
   return (
     <PageContainer
-      className="ql-container-wrapper ql-container-wrapper-has-tab"
-      title="系统设置"
+      className="ql-container-wrapper ql-container-wrapper-has-tab ql-setting-container"
+      title={intl.get('系统设置')}
       header={{
         style: headerStyle,
       }}
@@ -323,98 +293,82 @@ const Setting = () => {
         tabActiveKey === 'app'
           ? [
               <Button key="2" type="primary" onClick={() => addApp()}>
-                新建应用
+                {intl.get('创建应用')}
               </Button>,
             ]
           : []
       }
     >
-      <Tabs
-        defaultActiveKey="security"
-        size="small"
-        tabPosition="top"
-        onChange={tabChange}
-        items={[
-          {
-            key: 'security',
-            label: '安全设置',
-            children: <SecuritySettings user={user} userChange={reloadUser} />,
-          },
-          {
-            key: 'app',
-            label: '应用设置',
-            children: (
-              <Table
-                columns={columns}
-                pagination={false}
-                dataSource={dataSource}
-                rowKey="id"
-                size="middle"
-                scroll={{ x: 768 }}
-                loading={loading}
-              />
-            ),
-          },
-          {
-            key: 'notification',
-            label: '通知设置',
-            children: <NotificationSetting data={notificationInfo} />,
-          },
-          {
-            key: 'login',
-            label: '登录日志',
-            children: <LoginLog data={loginLogData} />,
-          },
-          {
-            key: 'other',
-            label: '其他设置',
-            children: (
-              <Form layout="vertical" form={form}>
-                <Form.Item
-                  label="主题设置"
-                  name="theme"
-                  initialValue={defaultTheme}
-                >
-                  <Radio.Group
-                    options={optionsWithDisabled}
-                    onChange={themeChange}
-                    value={defaultTheme}
-                    optionType="button"
-                    buttonStyle="solid"
-                  />
-                </Form.Item>
-                <Form.Item
-                  label="日志删除频率"
-                  name="frequency"
-                  tooltip="每x天自动删除x天以前的日志"
-                >
-                  <Input.Group compact>
-                    <InputNumber
-                      addonBefore="每"
-                      addonAfter="天"
-                      style={{ width: 150 }}
-                      min={0}
-                      value={logRemoveFrequency}
-                      onChange={(value) => setLogRemoveFrequency(value)}
-                    />
-                    <Button type="primary" onClick={updateRemoveLogFrequency}>
-                      确认
-                    </Button>
-                  </Input.Group>
-                </Form.Item>
-                <Form.Item label="检查更新" name="update">
-                  <CheckUpdate socketMessage={socketMessage} />
-                </Form.Item>
-              </Form>
-            ),
-          },
-          {
-            key: 'about',
-            label: '关于',
-            children: <About />,
-          },
-        ]}
-      ></Tabs>
+      <div ref={containergRef} style={{ height: '100%' }}>
+        <Tabs
+          style={{ height: '100%' }}
+          defaultActiveKey="security"
+          size="small"
+          tabPosition="top"
+          onChange={tabChange}
+          destroyInactiveTabPane
+          items={[
+            ...(!isDemoEnv
+              ? [
+                  {
+                    key: 'security',
+                    label: intl.get('安全设置'),
+                    children: (
+                      <SecuritySettings user={user} userChange={reloadUser} />
+                    ),
+                  },
+                ]
+              : []),
+            {
+              key: 'app',
+              label: intl.get('应用设置'),
+              children: (
+                <Table
+                  columns={columns}
+                  pagination={false}
+                  dataSource={dataSource}
+                  rowKey="id"
+                  size="middle"
+                  scroll={{ x: 1000, y: height }}
+                  loading={loading}
+                />
+              ),
+            },
+            {
+              key: 'notification',
+              label: intl.get('通知设置'),
+              children: <NotificationSetting data={notificationInfo} />,
+            },
+            {
+              key: 'syslog',
+              label: intl.get('系统日志'),
+              children: <SystemLog height={height} theme={theme} />,
+            },
+            {
+              key: 'login',
+              label: intl.get('登录日志'),
+              children: <LoginLog height={height} data={loginLogData} />,
+            },
+            {
+              key: 'dependence',
+              label: intl.get('依赖设置'),
+              children: <Dependence />,
+            },
+            {
+              key: 'other',
+              label: intl.get('其他设置'),
+              children: (
+                <Other reloadTheme={reloadTheme} systemInfo={systemInfo} />
+              ),
+            },
+            {
+              key: 'about',
+              label: intl.get('关于'),
+              children: <About systemInfo={systemInfo} />,
+            },
+          ]}
+        />
+      </div>
       <AppModal
         visible={isModalVisible}
         handleCancel={handleCancel}

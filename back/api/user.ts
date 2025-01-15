@@ -6,6 +6,7 @@ import { celebrate, Joi } from 'celebrate';
 import multer from 'multer';
 import path from 'path';
 import { v4 as uuidV4 } from 'uuid';
+import rateLimit from 'express-rate-limit';
 import config from '../config';
 const route = Router();
 
@@ -26,6 +27,10 @@ export default (app: Router) => {
 
   route.post(
     '/login',
+    rateLimit({
+      windowMs: 15 * 60 * 1000,
+      max: 100,
+    }),
     celebrate({
       body: Joi.object({
         username: Joi.string().required(),
@@ -69,6 +74,9 @@ export default (app: Router) => {
     async (req: Request, res: Response, next: NextFunction) => {
       const logger: Logger = Container.get('logger');
       try {
+        if (process.env.DeployEnv === 'demo') {
+          return res.send({ code: 450, message: '未知错误' });
+        }
         const userService = Container.get(UserService);
         await userService.updateUsernameAndPassword(req.body);
         res.send({ code: 200, message: '更新成功' });
@@ -82,7 +90,7 @@ export default (app: Router) => {
     const logger: Logger = Container.get('logger');
     try {
       const userService = Container.get(UserService);
-      const authInfo = await userService.getUserInfo();
+      const authInfo = await userService.getAuthInfo();
       res.send({
         code: 200,
         data: {

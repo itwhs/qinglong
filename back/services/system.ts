@@ -1,15 +1,41 @@
-import { Service, Inject } from 'typedi';
+import { spawn } from 'cross-spawn';
+import { Response } from 'express';
+import fs from 'fs';
+import got from 'got';
+import sum from 'lodash/sum';
+import path from 'path';
+import { Inject, Service } from 'typedi';
 import winston from 'winston';
 import config from '../config';
-import * as fs from 'fs';
-import _ from 'lodash';
-import { AuthDataType, AuthInfo, AuthModel, LoginStatus } from '../data/auth';
+import { TASK_COMMAND } from '../config/const';
+import {
+  getPid,
+  killTask,
+  parseContentVersion,
+  parseVersion,
+  promiseExec,
+  readDirs,
+  rmPath,
+} from '../config/util';
+import {
+  DependenceModel,
+  DependenceStatus,
+  DependenceTypes,
+} from '../data/dependence';
 import { NotificationInfo } from '../data/notify';
+import {
+  AuthDataType,
+  SystemInfo,
+  SystemInstance,
+  SystemModel,
+  SystemModelInfo,
+} from '../data/system';
+import taskLimit from '../shared/pLimit';
 import NotificationService from './notify';
-import ScheduleService from './schedule';
-import { spawn } from 'child_process';
+import ScheduleService, { TaskCallbacks } from './schedule';
 import SockService from './sock';
-import got from 'got';
+import os from 'os';
+import dayjs from 'dayjs';
 
 @Service()
 export default class SystemService {
@@ -22,20 +48,24 @@ export default class SystemService {
     private sockService: SockService,
   ) {}
 
-  public async getLogRemoveFrequency() {
-    const doc = await this.getDb({ type: AuthDataType.removeLogFrequency });
-    return doc || {};
-  }
-
-  private async updateAuthDb(payload: AuthInfo): Promise<any> {
-    await AuthModel.upsert({ ...payload });
-    const doc = await this.getDb({ type: payload.type });
+  public async getSystemConfig() {
+    const doc = await this.getDb({ type: AuthDataType.systemConfig });
     return doc;
   }
 
-  public async getDb(query: any): Promise<any> {
-    const doc: any = await AuthModel.findOne({ where: { ...query } });
-    return doc && (doc.get({ plain: true }) as any);
+  private async updateAuthDb(payload: SystemInfo): Promise<SystemInfo> {
+    const { id, ...others } = payload;
+    await SystemModel.update(others, { where: { id } });
+    const doc = await this.getDb({ id });
+    return doc;
+  }
+
+  public async getDb(query: any): Promise<SystemInfo> {
+    const doc = await SystemModel.findOne({ where: query });
+    if (!doc) {
+      throw new Error(`System ${JSON.stringify(query)} not found`);
+    }
+    return doc.get({ plain: true });
   }
 
   public async updateNotificationMode(notificationInfo: NotificationInfo) {
@@ -56,55 +86,215 @@ export default class SystemService {
     }
   }
 
-  public async updateLogRemoveFrequency(frequency: number) {
-    const oDoc = await this.getLogRemoveFrequency();
+  public async updateLogRemoveFrequency(info: SystemModelInfo) {
+    const oDoc = await this.getSystemConfig();
     const result = await this.updateAuthDb({
       ...oDoc,
-      type: AuthDataType.removeLogFrequency,
-      info: { frequency },
+      info: { ...oDoc.info, ...info },
     });
     const cron = {
-      id: result.id,
+      id: result.id as number,
       name: '删除日志',
-      command: `ql rmlog ${frequency}`,
+      command: `ql rmlog ${info.logRemoveFrequency}`,
+      runOrigin: 'system' as const,
     };
-    await this.scheduleService.cancelIntervalTask(cron);
-    if (frequency > 0) {
-      this.scheduleService.createIntervalTask(cron, {
-        days: frequency,
-      });
+    if (oDoc.info?.logRemoveFrequency) {
+      await this.scheduleService.cancelIntervalTask(cron);
     }
-    return { code: 200, data: { ...cron } };
+    if (info.logRemoveFrequency && info.logRemoveFrequency > 0) {
+      this.scheduleService.createIntervalTask(
+        cron,
+        {
+          days: info.logRemoveFrequency,
+        },
+        true,
+      );
+    }
+    return { code: 200, data: info };
+  }
+
+  public async updateCronConcurrency(info: SystemModelInfo) {
+    const oDoc = await this.getSystemConfig();
+    await this.updateAuthDb({
+      ...oDoc,
+      info: { ...oDoc.info, ...info },
+    });
+    if (info.cronConcurrency) {
+      await taskLimit.setCustomLimit(info.cronConcurrency);
+    }
+    return { code: 200, data: info };
+  }
+
+  public async updateDependenceProxy(info: SystemModelInfo) {
+    const oDoc = await this.getSystemConfig();
+    await this.updateAuthDb({
+      ...oDoc,
+      info: { ...oDoc.info, ...info },
+    });
+    if (info.dependenceProxy) {
+      await fs.promises.writeFile(
+        config.dependenceProxyFile,
+        `export http_proxy="${info.dependenceProxy}"\nexport https_proxy="${info.dependenceProxy}"`,
+      );
+    } else {
+      await fs.promises.rm(config.dependenceProxyFile);
+    }
+    return { code: 200, data: info };
+  }
+
+  public async updateNodeMirror(info: SystemModelInfo, res?: Response) {
+    const oDoc = await this.getSystemConfig();
+    await this.updateAuthDb({
+      ...oDoc,
+      info: { ...oDoc.info, ...info },
+    });
+    let cmd = 'pnpm config delete registry';
+    if (info.nodeMirror) {
+      cmd = `pnpm config set registry ${info.nodeMirror}`;
+    }
+    let command = `cd && ${cmd}`;
+    const docs = await DependenceModel.findAll({
+      where: {
+        type: DependenceTypes.nodejs,
+        status: DependenceStatus.installed,
+      },
+    });
+    if (docs.length > 0) {
+      command += ` && pnpm i -g`;
+    }
+    this.scheduleService.runTask(
+      command,
+      {
+        onStart: async (cp) => {
+          res?.setHeader('QL-Task-Pid', `${cp.pid}`);
+          res?.end();
+        },
+        onEnd: async () => {
+          this.sockService.sendMessage({
+            type: 'updateNodeMirror',
+            message: 'update node mirror end',
+          });
+        },
+        onError: async (message: string) => {
+          this.sockService.sendMessage({ type: 'updateNodeMirror', message });
+        },
+        onLog: async (message: string) => {
+          this.sockService.sendMessage({ type: 'updateNodeMirror', message });
+        },
+      },
+      {
+        command,
+        id: 'update-node-mirror',
+        runOrigin: 'system',
+      },
+    );
+  }
+
+  public async updatePythonMirror(info: SystemModelInfo) {
+    const oDoc = await this.getSystemConfig();
+    await this.updateAuthDb({
+      ...oDoc,
+      info: { ...oDoc.info, ...info },
+    });
+    let cmd = 'pip config unset global.index-url';
+    if (info.pythonMirror) {
+      cmd = `pip3 config set global.index-url ${info.pythonMirror}`;
+    }
+    await promiseExec(cmd);
+    return { code: 200, data: info };
+  }
+
+  public async updateLinuxMirror(
+    info: SystemModelInfo,
+    res?: Response,
+    onEnd?: () => void,
+  ) {
+    const oDoc = await this.getSystemConfig();
+    await this.updateAuthDb({
+      ...oDoc,
+      info: { ...oDoc.info, ...info },
+    });
+    let defaultDomain = 'https://dl-cdn.alpinelinux.org';
+    let targetDomain = 'https://dl-cdn.alpinelinux.org';
+    if (os.platform() !== 'linux') {
+      return;
+    }
+    const content = await fs.promises.readFile('/etc/apk/repositories', {
+      encoding: 'utf-8',
+    });
+    const domainMatch = content.match(/(http.*)\/alpine\/.*/);
+    if (domainMatch) {
+      defaultDomain = domainMatch[1];
+    }
+    if (info.linuxMirror) {
+      targetDomain = info.linuxMirror;
+    }
+    const command = `sed -i 's/${defaultDomain.replace(
+      /\//g,
+      '\\/',
+    )}/${targetDomain.replace(
+      /\//g,
+      '\\/',
+    )}/g' /etc/apk/repositories && apk update -f`;
+
+    this.scheduleService.runTask(
+      command,
+      {
+        onStart: async (cp) => {
+          res?.setHeader('QL-Task-Pid', `${cp.pid}`);
+          res?.end();
+        },
+        onEnd: async () => {
+          this.sockService.sendMessage({
+            type: 'updateLinuxMirror',
+            message: 'update linux mirror end',
+          });
+          onEnd?.();
+        },
+        onError: async (message: string) => {
+          this.sockService.sendMessage({ type: 'updateLinuxMirror', message });
+        },
+        onLog: async (message: string) => {
+          this.sockService.sendMessage({ type: 'updateLinuxMirror', message });
+        },
+      },
+      {
+        command,
+        id: 'update-linux-mirror',
+        runOrigin: 'system',
+      },
+    );
   }
 
   public async checkUpdate() {
     try {
-      const versionRegx = /.*export const version = \'(.*)\'\;/;
-      const logRegx = /.*export const changeLog = \`((.*\n.*)+)\`;/;
+      const currentVersionContent = await parseVersion(config.versionFile);
 
-      const currentVersionFile = fs.readFileSync(config.versionFile, 'utf8');
-      const currentVersion = currentVersionFile.match(versionRegx)![1];
-
-      let lastVersion = '';
-      let lastLog = '';
+      let lastVersionContent;
       try {
-        const result = await got.get(config.lastVersionFile, {
-          timeout: 6000,
-          retry: 0,
-        });
-        const lastVersionFileContent = result.body;
-        lastVersion = lastVersionFileContent.match(versionRegx)![1];
-        lastLog = lastVersionFileContent.match(logRegx)
-          ? lastVersionFileContent.match(logRegx)![1]
-          : '';
+        const result = await got.get(
+          `${config.lastVersionFile}?t=${Date.now()}`,
+          {
+            timeout: 30000,
+          },
+        );
+        lastVersionContent = parseContentVersion(result.body);
       } catch (error) {}
+
+      if (!lastVersionContent) {
+        lastVersionContent = currentVersionContent;
+      }
 
       return {
         code: 200,
         data: {
-          hasNewVersion: this.checkHasNewVersion(currentVersion, lastVersion),
-          lastVersion,
-          lastLog,
+          hasNewVersion: this.checkHasNewVersion(
+            currentVersionContent.version,
+            lastVersionContent.version,
+          ),
+          lastVersion: lastVersionContent.version,
+          lastLog: lastVersionContent.changeLog,
+          lastLogLink: lastVersionContent.changeLogLink,
         },
       };
     } catch (error: any) {
@@ -135,12 +325,8 @@ export default class SystemService {
   }
 
   public async updateSystem() {
-    const cp = spawn('ql -l update', { shell: '/bin/bash' });
+    const cp = spawn('real_time=true ql update false', { shell: '/bin/bash' });
 
-    this.sockService.sendMessage({
-      type: 'updateSystemVersion',
-      message: `开始更新系统`,
-    });
     cp.stdout.on('data', (data) => {
       this.sockService.sendMessage({
         type: 'updateSystemVersion',
@@ -165,12 +351,124 @@ export default class SystemService {
     return { code: 200 };
   }
 
+  public async reloadSystem(target?: 'system' | 'data') {
+    const cmd = `real_time=true ql reload ${target || ''}`;
+    const cp = spawn(cmd, { shell: '/bin/bash' });
+    cp.unref();
+    return { code: 200 };
+  }
+
   public async notify({ title, content }: { title: string; content: string }) {
     const isSuccess = await this.notificationService.notify(title, content);
     if (isSuccess) {
       return { code: 200, message: '通知发送成功' };
     } else {
       return { code: 400, message: '通知发送失败，请检查系统设置/通知配置' };
+    }
+  }
+
+  public async run({ command }: { command: string }, callback: TaskCallbacks) {
+    if (!command.startsWith(TASK_COMMAND)) {
+      command = `${TASK_COMMAND} ${command}`;
+    }
+    this.scheduleService.runTask(`real_time=true ${command}`, callback, {
+      command,
+      id: command.replace(/ /g, '-'),
+      runOrigin: 'system',
+    });
+  }
+
+  public async stop({ command, pid }: { command: string; pid: number }) {
+    if (!pid && !command) {
+      return { code: 400, message: '参数错误' };
+    }
+
+    if (pid) {
+      await killTask(pid);
+      return { code: 200 };
+    }
+
+    if (!command.startsWith(TASK_COMMAND)) {
+      command = `${TASK_COMMAND} ${command}`;
+    }
+    const _pid = await getPid(command);
+    if (_pid) {
+      await killTask(_pid);
+      return { code: 200 };
+    } else {
+      return { code: 400, message: '任务未找到' };
+    }
+  }
+
+  public async exportData(res: Response) {
+    try {
+      await promiseExec(
+        `cd ${config.dataPath} && cd ../ && tar -zcvf ${config.dataTgzFile} data/`,
+      );
+      res.download(config.dataTgzFile);
+    } catch (error: any) {
+      return res.send({ code: 400, message: error.message });
+    }
+  }
+
+  public async importData() {
+    try {
+      await promiseExec(`rm -rf ${path.join(config.tmpPath, 'data')}`);
+      const res = await promiseExec(
+        `cd ${config.tmpPath} && tar -zxvf ${config.dataTgzFile}`,
+      );
+      return { code: 200, data: res };
+    } catch (error: any) {
+      return { code: 400, message: error.message };
+    }
+  }
+
+  public async getSystemLog(
+    res: Response,
+    query: {
+      startTime?: string;
+      endTime?: string;
+    },
+  ) {
+    const startTime = dayjs(query.startTime || undefined)
+      .startOf('d')
+      .valueOf();
+    const endTime = dayjs(query.endTime || undefined)
+      .endOf('d')
+      .valueOf();
+    const result = await readDirs(config.systemLogPath, config.systemLogPath);
+    const logs = result
+      .reverse()
+      .filter((x) => x.title.endsWith('.log'))
+      .filter((x) => x.createTime >= startTime && x.createTime <= endTime);
+
+    res.set({
+      'Content-Length': sum(logs.map((x) => x.size)),
+    });
+    (function sendFiles(res, fileNames) {
+      if (fileNames.length === 0) {
+        res.end();
+        return;
+      }
+
+      const currentLog = fileNames.shift();
+      if (currentLog) {
+        const currentFileStream = fs.createReadStream(
+          path.join(config.systemLogPath, currentLog.title),
+        );
+        currentFileStream.on('end', () => {
+          sendFiles(res, fileNames);
+        });
+        currentFileStream.pipe(res, { end: false });
+      }
+    })(res, logs);
+  }
+
+  public async deleteSystemLog() {
+    const result = await readDirs(config.systemLogPath, config.systemLogPath);
+    const logs = result.reverse().filter((x) => x.title.endsWith('.log'));
+    for (const log of logs) {
+      await rmPath(path.join(config.systemLogPath, log.title));
     }
   }
 }

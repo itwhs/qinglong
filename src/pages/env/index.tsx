@@ -1,4 +1,11 @@
-import React, { useCallback, useRef, useState, useEffect } from 'react';
+import intl from 'react-intl-universal';
+import React, {
+  useCallback,
+  useRef,
+  useState,
+  useEffect,
+  useMemo,
+} from 'react';
 import {
   Button,
   message,
@@ -28,11 +35,15 @@ import EditNameModal from './editNameModal';
 import { DndProvider, useDrag, useDrop } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import './index.less';
-import { exportJson, getTableScroll } from '@/utils/index';
+import { exportJson } from '@/utils/index';
 import { useOutletContext } from '@umijs/max';
 import { SharedContext } from '@/layouts';
+import useTableScrollHeight from '@/hooks/useTableScrollHeight';
+import Copy from '../../components/copy';
+import { useVT } from 'virtualizedtableforantd4';
+import dayjs from 'dayjs';
 
-const { Text, Paragraph } = Typography;
+const { Paragraph } = Typography;
 const { Search } = Input;
 
 enum Status {
@@ -57,100 +68,64 @@ enum OperationPath {
 
 const type = 'DragableBodyRow';
 
-const DragableBodyRow = ({
-  index,
-  moveRow,
-  className,
-  style,
-  ...restProps
-}: any) => {
-  const ref = useRef();
-  const [{ isOver, dropClassName }, drop] = useDrop({
-    accept: type,
-    collect: (monitor) => {
-      const { index: dragIndex } = (monitor.getItem() as any) || {};
-      if (dragIndex === index) {
-        return {};
-      }
-      return {
-        isOver: monitor.isOver(),
-        dropClassName:
-          dragIndex < index ? ' drop-over-downward' : ' drop-over-upward',
-      };
-    },
-    drop: (item: any) => {
-      moveRow(item.index, index);
-    },
-  });
-  const [, drag] = useDrag({
-    type,
-    item: { index },
-    collect: (monitor) => ({
-      isDragging: monitor.isDragging(),
-    }),
-  });
-  drop(drag(ref));
-
-  return (
-    <tr
-      ref={ref}
-      className={`${className}${isOver ? dropClassName : ''}`}
-      style={{ cursor: 'move', ...style }}
-      {...restProps}
-    />
-  );
-};
-
 const Env = () => {
   const { headerStyle, isPhone, theme } = useOutletContext<SharedContext>();
   const columns: any = [
     {
-      title: '序号',
-      align: 'center' as const,
-      width: 60,
+      title: intl.get('序号'),
+      width: 80,
       render: (text: string, record: any, index: number) => {
         return <span style={{ cursor: 'text' }}>{index + 1} </span>;
       },
     },
     {
-      title: '名称',
+      title: intl.get('名称'),
       dataIndex: 'name',
       key: 'name',
-      align: 'center' as const,
       sorter: (a: any, b: any) => a.name.localeCompare(b.name),
-    },
-    {
-      title: '值',
-      dataIndex: 'value',
-      key: 'value',
-      align: 'center' as const,
-      width: '35%',
       render: (text: string, record: any) => {
         return (
-          <Paragraph
-            style={{
-              wordBreak: 'break-all',
-              marginBottom: 0,
-              textAlign: 'left',
-            }}
-            ellipsis={{ tooltip: text, rows: 2 }}
-          >
-            {text}
-          </Paragraph>
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            <Tooltip title={text} placement="topLeft">
+              <div className="text-ellipsis">{text}</div>
+            </Tooltip>
+            <Copy text={text} />
+          </div>
         );
       },
     },
     {
-      title: '备注',
-      dataIndex: 'remarks',
-      key: 'remarks',
-      align: 'center' as const,
+      title: intl.get('值'),
+      dataIndex: 'value',
+      key: 'value',
+      width: '35%',
+      render: (text: string, record: any) => {
+        return (
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            <Tooltip title={text} placement="topLeft">
+              <div className="text-ellipsis">{text}</div>
+            </Tooltip>
+            <Copy text={text} />
+          </div>
+        );
+      },
     },
     {
-      title: '更新时间',
+      title: intl.get('备注'),
+      dataIndex: 'remarks',
+      key: 'remarks',
+      render: (text: string, record: any) => {
+        return (
+          <Tooltip title={text} placement="topLeft">
+            <div className="text-ellipsis">{text}</div>
+          </Tooltip>
+        );
+      },
+    },
+    {
+      title: intl.get('更新时间'),
       dataIndex: 'timestamp',
       key: 'timestamp',
-      align: 'center' as const,
       width: 165,
       ellipsis: {
         showTitle: false,
@@ -163,13 +138,9 @@ const Env = () => {
         },
       },
       render: (text: string, record: any) => {
-        const language = navigator.language || navigator.languages[0];
-        const time = record.updatedAt || record.timestamp;
-        const date = new Date(time)
-          .toLocaleString(language, {
-            hour12: false,
-          })
-          .replace(' 24:', ' 00:');
+        const date = dayjs(record.updatedAt || record.timestamp).format(
+          'YYYY-MM-DD HH:mm:ss',
+        );
         return (
           <Tooltip
             placement="topLeft"
@@ -182,18 +153,17 @@ const Env = () => {
       },
     },
     {
-      title: '状态',
+      title: intl.get('状态'),
       key: 'status',
       dataIndex: 'status',
-      align: 'center' as const,
-      width: 70,
+      width: 100,
       filters: [
         {
-          text: '已启用',
+          text: intl.get('已启用'),
           value: 0,
         },
         {
-          text: '已禁用',
+          text: intl.get('已禁用'),
           value: 1,
         },
       ],
@@ -202,29 +172,32 @@ const Env = () => {
         return (
           <Space size="middle" style={{ cursor: 'text' }}>
             <Tag color={StatusColor[record.status]} style={{ marginRight: 0 }}>
-              {Status[record.status]}
+              {intl.get(Status[record.status])}
             </Tag>
           </Space>
         );
       },
     },
     {
-      title: '操作',
+      title: intl.get('操作'),
       key: 'action',
       width: 120,
-      align: 'center' as const,
       render: (text: string, record: any, index: number) => {
         const isPc = !isPhone;
         return (
           <Space size="middle">
-            <Tooltip title={isPc ? '编辑' : ''}>
+            <Tooltip title={isPc ? intl.get('编辑') : ''}>
               <a onClick={() => editEnv(record, index)}>
                 <EditOutlined />
               </a>
             </Tooltip>
             <Tooltip
               title={
-                isPc ? (record.status === Status.已禁用 ? '启用' : '禁用') : ''
+                isPc
+                  ? record.status === Status.已禁用
+                    ? intl.get('启用')
+                    : intl.get('禁用')
+                  : ''
               }
             >
               <a onClick={() => enabledOrDisabledEnv(record, index)}>
@@ -235,7 +208,7 @@ const Env = () => {
                 )}
               </a>
             </Tooltip>
-            <Tooltip title={isPc ? '删除' : ''}>
+            <Tooltip title={isPc ? intl.get('删除') : ''}>
               <a onClick={() => deleteEnv(record, index)}>
                 <DeleteOutlined />
               </a>
@@ -252,8 +225,9 @@ const Env = () => {
   const [editedEnv, setEditedEnv] = useState();
   const [selectedRowIds, setSelectedRowIds] = useState<string[]>([]);
   const [searchText, setSearchText] = useState('');
-  const [tableScrollHeight, setTableScrollHeight] = useState<number>();
   const [importLoading, setImportLoading] = useState(false);
+  const tableRef = useRef<HTMLDivElement>(null);
+  const tableScrollHeight = useTableScrollHeight(tableRef, 59);
 
   const getEnvs = () => {
     setLoading(true);
@@ -269,15 +243,25 @@ const Env = () => {
 
   const enabledOrDisabledEnv = (record: any, index: number) => {
     Modal.confirm({
-      title: `确认${record.status === Status.已禁用 ? '启用' : '禁用'}`,
+      title: `确认${
+        record.status === Status.已禁用 ? intl.get('启用') : intl.get('禁用')
+      }`,
       content: (
         <>
-          确认{record.status === Status.已禁用 ? '启用' : '禁用'}
+          {intl.get('确认')}
+          {record.status === Status.已禁用
+            ? intl.get('启用')
+            : intl.get('禁用')}
           Env{' '}
-          <Text style={{ wordBreak: 'break-all' }} type="warning">
+          <Paragraph
+            style={{ wordBreak: 'break-all', display: 'inline' }}
+            ellipsis={{ rows: 6, expandable: true }}
+            type="warning"
+            copyable
+          >
             {record.value}
-          </Text>{' '}
-          吗
+          </Paragraph>{' '}
+          {intl.get('吗')}
         </>
       ),
       onOk() {
@@ -286,14 +270,16 @@ const Env = () => {
             `${config.apiPrefix}envs/${
               record.status === Status.已禁用 ? 'enable' : 'disable'
             }`,
-            {
-              data: [record.id],
-            },
+            [record.id],
           )
           .then(({ code, data }) => {
             if (code === 200) {
               message.success(
-                `${record.status === Status.已禁用 ? '启用' : '禁用'}成功`,
+                `${
+                  record.status === Status.已禁用
+                    ? intl.get('启用')
+                    : intl.get('禁用')
+                }${intl.get('成功')}`,
               );
               const newStatus =
                 record.status === Status.已禁用 ? Status.已启用 : Status.已禁用;
@@ -324,14 +310,19 @@ const Env = () => {
 
   const deleteEnv = (record: any, index: number) => {
     Modal.confirm({
-      title: '确认删除',
+      title: intl.get('确认删除'),
       content: (
         <>
-          确认删除变量{' '}
-          <Text style={{ wordBreak: 'break-all' }} type="warning">
+          {intl.get('确认删除变量')}{' '}
+          <Paragraph
+            style={{ wordBreak: 'break-all', display: 'inline' }}
+            ellipsis={{ rows: 6, expandable: true }}
+            type="warning"
+            copyable
+          >
             {record.name}: {record.value}
-          </Text>{' '}
-          吗
+          </Paragraph>{' '}
+          {intl.get('吗')}
         </>
       ),
       onOk() {
@@ -339,7 +330,7 @@ const Env = () => {
           .delete(`${config.apiPrefix}envs`, { data: [record.id] })
           .then(({ code, data }) => {
             if (code === 200) {
-              message.success('删除成功');
+              message.success(intl.get('删除成功'));
               const result = [...value];
               result.splice(index, 1);
               setValue(result);
@@ -354,7 +345,7 @@ const Env = () => {
 
   const handleCancel = (env?: any[]) => {
     setIsModalVisible(false);
-    env && handleEnv(env);
+    getEnvs();
   };
 
   const handleEditNameCancel = (env?: any[]) => {
@@ -362,41 +353,78 @@ const Env = () => {
     getEnvs();
   };
 
-  const handleEnv = (env: any) => {
-    const result = [...value];
-    const index = value.findIndex((x) => x.id === env.id);
-    if (index === -1) {
-      env = Array.isArray(env) ? env : [env];
-      result.push(...env);
-    } else {
-      result.splice(index, 1, {
-        ...env,
-      });
-    }
-    setValue(result);
-  };
+  const [vt, setVT] = useVT(
+    () => ({ scroll: { y: tableScrollHeight } }),
+    [tableScrollHeight],
+  );
 
-  const components = {
-    body: {
-      row: DragableBodyRow,
-    },
-  };
+  const DragableBodyRow = React.forwardRef((props: any, ref) => {
+    const { index, moveRow, className, style, ...restProps } = props;
+    const [{ isOver, dropClassName }, drop] = useDrop({
+      accept: type,
+      collect: (monitor) => {
+        const { index: dragIndex } = (monitor.getItem() as any) || {};
+        if (dragIndex === index) {
+          return {};
+        }
+        return {
+          isOver: monitor.isOver(),
+          dropClassName:
+            dragIndex < index ? ' drop-over-downward' : ' drop-over-upward',
+        };
+      },
+      drop: (item: any) => {
+        moveRow(item.index, index);
+      },
+    });
+    const [, drag] = useDrag({
+      type,
+      item: { index },
+      collect: (monitor) => ({
+        isDragging: monitor.isDragging(),
+      }),
+    });
+
+    useEffect(() => {
+      drop(drag(ref));
+    }, [ref]);
+
+    return (
+      <tr
+        ref={ref}
+        className={`${className}${isOver ? dropClassName : ''}`}
+        style={{ cursor: 'move', ...style }}
+        {...restProps}
+      />
+    );
+  });
+
+  useEffect(
+    () =>
+      setVT({
+        body: {
+          row: DragableBodyRow,
+        },
+      }),
+    [],
+  );
 
   const moveRow = useCallback(
-    (dragIndex, hoverIndex) => {
+    (dragIndex: number, hoverIndex: number) => {
       if (dragIndex === hoverIndex) {
         return;
       }
       const dragRow = value[dragIndex];
       request
         .put(`${config.apiPrefix}envs/${dragRow.id}/move`, {
-          data: { fromIndex: dragIndex, toIndex: hoverIndex },
+          fromIndex: dragIndex,
+          toIndex: hoverIndex,
         })
         .then(({ code, data }) => {
           if (code === 200) {
             const newData = [...value];
             newData.splice(dragIndex, 1);
-            newData.splice(hoverIndex, 0, { ...dragRow, ...data.data });
+            newData.splice(hoverIndex, 0, { ...dragRow, ...data });
             setValue([...newData]);
           }
         });
@@ -406,29 +434,23 @@ const Env = () => {
 
   const onSelectChange = (selectedIds: any[]) => {
     setSelectedRowIds(selectedIds);
-
-    setTimeout(() => {
-      if (selectedRowIds.length === 0 || selectedIds.length === 0) {
-        setTableScrollHeight(getTableScroll({ extraHeight: 87 }));
-      }
-    });
   };
 
   const rowSelection = {
-    selectedRowIds,
+    selectedRowKeys: selectedRowIds,
     onChange: onSelectChange,
   };
 
   const delEnvs = () => {
     Modal.confirm({
-      title: '确认删除',
-      content: <>确认删除选中的变量吗</>,
+      title: intl.get('确认删除'),
+      content: <>{intl.get('确认删除选中的变量吗')}</>,
       onOk() {
         request
           .delete(`${config.apiPrefix}envs`, { data: selectedRowIds })
           .then(({ code, data }) => {
             if (code === 200) {
-              message.success('批量删除成功');
+              message.success(intl.get('批量删除成功'));
               setSelectedRowIds([]);
               getEnvs();
             }
@@ -443,12 +465,19 @@ const Env = () => {
   const operateEnvs = (operationStatus: number) => {
     Modal.confirm({
       title: `确认${OperationName[operationStatus]}`,
-      content: <>确认{OperationName[operationStatus]}选中的变量吗</>,
+      content: (
+        <>
+          {intl.get('确认')}
+          {OperationName[operationStatus]}
+          {intl.get('选中的变量吗')}
+        </>
+      ),
       onOk() {
         request
-          .put(`${config.apiPrefix}envs/${OperationPath[operationStatus]}`, {
-            data: selectedRowIds,
-          })
+          .put(
+            `${config.apiPrefix}envs/${OperationPath[operationStatus]}`,
+            selectedRowIds,
+          )
           .then(({ code, data }) => {
             if (code === 200) {
               getEnvs();
@@ -485,9 +514,7 @@ const Env = () => {
       try {
         const { code, data } = await request.post(
           `${config.apiPrefix}envs/upload`,
-          {
-            data: formData,
-          },
+          formData,
         );
 
         if (code === 200) {
@@ -507,19 +534,13 @@ const Env = () => {
     getEnvs();
   }, [searchText]);
 
-  useEffect(() => {
-    setTimeout(() => {
-      setTableScrollHeight(getTableScroll({ extraHeight: 87 }));
-    });
-  }, []);
-
   return (
     <PageContainer
       className="ql-container-wrapper env-wrapper"
-      title="环境变量"
+      title={intl.get('环境变量')}
       extra={[
         <Search
-          placeholder="请输入名称/值/备注"
+          placeholder={intl.get('请输入名称/值/备注')}
           style={{ width: 'auto' }}
           enterButton
           loading={loading}
@@ -531,79 +552,82 @@ const Env = () => {
             icon={<UploadOutlined />}
             loading={importLoading}
           >
-            导入
+            {intl.get('导入')}
           </Button>
         </Upload>,
         <Button key="2" type="primary" onClick={() => addEnv()}>
-          新建变量
+          {intl.get('创建变量')}
         </Button>,
       ]}
       header={{
         style: headerStyle,
       }}
     >
-      {selectedRowIds.length > 0 && (
-        <div style={{ marginBottom: 16 }}>
-          <Button
-            type="primary"
-            style={{ marginBottom: 5 }}
-            onClick={modifyName}
-          >
-            批量修改变量名称
-          </Button>
-          <Button
-            type="primary"
-            style={{ marginBottom: 5, marginLeft: 8 }}
-            onClick={delEnvs}
-          >
-            批量删除
-          </Button>
-          <Button
-            type="primary"
-            onClick={() => exportEnvs()}
-            style={{ marginLeft: 8, marginRight: 8 }}
-          >
-            批量导出
-          </Button>
-          <Button
-            type="primary"
-            onClick={() => operateEnvs(0)}
-            style={{ marginLeft: 8, marginBottom: 5 }}
-          >
-            批量启用
-          </Button>
-          <Button
-            type="primary"
-            onClick={() => operateEnvs(1)}
-            style={{ marginLeft: 8, marginRight: 8 }}
-          >
-            批量禁用
-          </Button>
-          <span style={{ marginLeft: 8 }}>
-            已选择
-            <a>{selectedRowIds?.length}</a>项
-          </span>
-        </div>
-      )}
-      <DndProvider backend={HTML5Backend}>
-        <Table
-          columns={columns}
-          rowSelection={rowSelection}
-          pagination={false}
-          dataSource={value}
-          rowKey="id"
-          size="middle"
-          scroll={{ x: 1000, y: tableScrollHeight }}
-          components={components}
-          loading={loading}
-          onRow={(record: any, index: number) => {
-            return {
-              index,
-              moveRow,
-            } as any;
-          }}
-        />
-      </DndProvider>
+      <div ref={tableRef}>
+        {selectedRowIds.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <Button
+              type="primary"
+              style={{ marginBottom: 5 }}
+              onClick={modifyName}
+            >
+              {intl.get('批量修改变量名称')}
+            </Button>
+            <Button
+              type="primary"
+              style={{ marginBottom: 5, marginLeft: 8 }}
+              onClick={delEnvs}
+            >
+              {intl.get('批量删除')}
+            </Button>
+            <Button
+              type="primary"
+              onClick={() => exportEnvs()}
+              style={{ marginLeft: 8, marginRight: 8 }}
+            >
+              {intl.get('批量导出')}
+            </Button>
+            <Button
+              type="primary"
+              onClick={() => operateEnvs(0)}
+              style={{ marginLeft: 8, marginBottom: 5 }}
+            >
+              {intl.get('批量启用')}
+            </Button>
+            <Button
+              type="primary"
+              onClick={() => operateEnvs(1)}
+              style={{ marginLeft: 8, marginRight: 8 }}
+            >
+              {intl.get('批量禁用')}
+            </Button>
+            <span style={{ marginLeft: 8 }}>
+              {intl.get('已选择')}
+              <a>{selectedRowIds?.length}</a>
+              {intl.get('项')}
+            </span>
+          </div>
+        )}
+        <DndProvider backend={HTML5Backend}>
+          <Table
+            columns={columns}
+            rowSelection={rowSelection}
+            pagination={false}
+            dataSource={value}
+            rowKey="id"
+            size="middle"
+            scroll={{ x: 1200, y: tableScrollHeight }}
+            components={vt}
+            loading={loading}
+            onRow={(record: any, index: number | undefined) => {
+              return {
+                index,
+                moveRow,
+              } as any;
+            }}
+          />
+        </DndProvider>
+      </div>
       <EnvModal
         visible={isModalVisible}
         handleCancel={handleCancel}

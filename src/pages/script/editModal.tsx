@@ -1,4 +1,11 @@
-import React, { useEffect, useState, useRef } from 'react';
+import intl from 'react-intl-universal';
+import React, {
+  useEffect,
+  useState,
+  useRef,
+  useCallback,
+  useReducer,
+} from 'react';
 import { Drawer, Button, Tabs, Badge, Select, TreeSelect } from 'antd';
 import { request } from '@/utils/http';
 import config from '@/utils/config';
@@ -7,20 +14,11 @@ import Editor from '@monaco-editor/react';
 import SaveModal from './saveModal';
 import SettingModal from './setting';
 import { useTheme } from '@/utils/hooks';
+import { getEditorMode, logEnded } from '@/utils';
+import WebSocketManager from '@/utils/websocket';
+import Ansi from 'ansi-to-react';
 
 const { Option } = Select;
-const LangMap: any = {
-  '.py': 'python',
-  '.js': 'javascript',
-  '.sh': 'shell',
-  '.ts': 'typescript',
-};
-const prefixMap: any = {
-  python: '.py',
-  javascript: '.js',
-  shell: '.sh',
-  typescript: '.ts',
-};
 
 const EditModal = ({
   treeData,
@@ -28,27 +26,25 @@ const EditModal = ({
   content,
   handleCancel,
   visible,
-  socketMessage,
 }: {
   treeData?: any;
   content?: string;
   visible: boolean;
-  socketMessage: any;
   currentNode: any;
   handleCancel: () => void;
 }) => {
   const [value, setValue] = useState('');
-  const [language, setLanguage] = useState<string>('javascript');
+  const [language, setLanguage] = useState<string>();
   const [cNode, setCNode] = useState<any>();
-  const [selectedKey, setSelectedKey] = useState<string>('');
+  const [selectedKey, setSelectedKey] = useState<string>();
   const [saveModalVisible, setSaveModalVisible] = useState<boolean>(false);
   const [settingModalVisible, setSettingModalVisible] =
     useState<boolean>(false);
-  const [log, setLog] = useState<string>('');
+  const [log, setLog] = useState('');
   const { theme } = useTheme();
   const editorRef = useRef<any>(null);
   const [isRunning, setIsRunning] = useState(false);
-
+  const [currentPid, setCurrentPid] = useState(null);
   const cancel = () => {
     handleCancel();
   };
@@ -62,7 +58,7 @@ const EditModal = ({
       return;
     }
 
-    const newMode = LangMap[value.slice(-3)] || '';
+    const newMode = getEditorMode(value);
     setCNode(node);
     setLanguage(newMode);
     getDetail(node);
@@ -71,7 +67,11 @@ const EditModal = ({
 
   const getDetail = (node: any) => {
     request
-      .get(`${config.apiPrefix}scripts/${node.title}?path=${node.parent || ''}`)
+      .get(
+        `${config.apiPrefix}scripts/detail?file=${node.title}&path=${
+          node.parent || ''
+        }`,
+      )
       .then(({ code, data }) => {
         if (code === 200) {
           setValue(data);
@@ -84,31 +84,27 @@ const EditModal = ({
     const content = editorRef.current.getValue().replace(/\r\n/g, '\n');
     request
       .put(`${config.apiPrefix}scripts/run`, {
-        data: {
-          filename: cNode.title,
-          path: cNode.parent || '',
-          content,
-        },
+        filename: cNode.title,
+        path: cNode.parent || '',
+        content,
       })
       .then(({ code, data }) => {
         if (code === 200) {
           setIsRunning(true);
+          setCurrentPid(data);
         }
       });
   };
 
   const stop = () => {
-    if (!cNode || !cNode.title) {
+    if (!cNode || !cNode.title || !currentPid) {
       return;
     }
-    const content = editorRef.current.getValue().replace(/\r\n/g, '\n');
     request
       .put(`${config.apiPrefix}scripts/stop`, {
-        data: {
-          filename: cNode.title,
-          path: cNode.parent || '',
-          content,
-        },
+        filename: cNode.title,
+        path: cNode.parent || '',
+        pid: currentPid,
       })
       .then(({ code, data }) => {
         if (code === 200) {
@@ -117,28 +113,25 @@ const EditModal = ({
       });
   };
 
-  useEffect(() => {
-    if (!socketMessage) {
-      return;
-    }
-
-    let { type, message: _message, references } = socketMessage;
-
-    if (type !== 'manuallyRunScript') {
-      return;
-    }
-
-    if (_message.includes('执行结束')) {
+  const handleMessage = useCallback((payload: any) => {
+    let { message: _message } = payload;
+    if (logEnded(_message)) {
       setTimeout(() => {
         setIsRunning(false);
       }, 300);
     }
 
-    if (log) {
-      _message = `\n${_message}`;
-    }
-    setLog(`${log}${_message}`);
-  }, [socketMessage]);
+    setLog((p) => `${p}${_message}`);
+  }, []);
+
+  useEffect(() => {
+    const ws = WebSocketManager.getInstance();
+    ws.subscribe('manuallyRunScript', handleMessage);
+
+    return () => {
+      ws.unsubscribe('manuallyRunScript', handleMessage);
+    };
+  }, []);
 
   useEffect(() => {
     setLog('');
@@ -146,7 +139,7 @@ const EditModal = ({
       setCNode(currentNode);
       setValue(content as string);
       setSelectedKey(currentNode.key);
-      const newMode = LangMap[value.slice(-3)] || '';
+      const newMode = getEditorMode(currentNode.title);
       setLanguage(newMode);
     }
   }, [content, currentNode]);
@@ -159,14 +152,15 @@ const EditModal = ({
         <>
           <TreeSelect
             treeExpandAction="click"
-            style={{ marginRight: 8, width: 150 }}
+            style={{ marginRight: 8, width: 300 }}
             value={selectedKey}
             dropdownStyle={{ maxHeight: 400, overflow: 'auto' }}
             treeData={treeData}
-            placeholder="请选择脚本文件"
+            placeholder={intl.get('请选择脚本文件')}
             fieldNames={{ value: 'key', label: 'title' }}
             showSearch
             onSelect={onSelect}
+            treeLine={{ showLeafIcon: true }}
           />
           <Select
             value={language}
@@ -185,7 +179,7 @@ const EditModal = ({
             style={{ marginRight: 8 }}
             onClick={isRunning ? stop : run}
           >
-            {isRunning ? '停止' : '运行'}
+            {isRunning ? intl.get('停止') : intl.get('运行')}
           </Button>
           <Button
             type="primary"
@@ -194,17 +188,17 @@ const EditModal = ({
               setLog('');
             }}
           >
-            清空日志
+            {intl.get('清空日志')}
           </Button>
-          <Button
+          {/* <Button
             type="primary"
             style={{ marginRight: 8 }}
             onClick={() => {
               setSettingModalVisible(true);
             }}
           >
-            设置
-          </Button>
+            {intl.get('设置')}
+          </Button> */}
           <Button
             type="primary"
             style={{ marginRight: 8 }}
@@ -212,7 +206,7 @@ const EditModal = ({
               setSaveModalVisible(true);
             }}
           >
-            保存
+            {intl.get('保存')}
           </Button>
           <Button
             type="primary"
@@ -222,7 +216,7 @@ const EditModal = ({
               handleCancel();
             }}
           >
-            退出
+            {intl.get('退出')}
           </Button>
         </>
       }
@@ -237,6 +231,7 @@ const EditModal = ({
         minSize={200}
         defaultSize="50%"
         style={{ height: 'calc(100vh - 55px)' }}
+        pane2Style={{ overflowY: 'auto' }}
       >
         <Editor
           language={language}
@@ -247,12 +242,19 @@ const EditModal = ({
             minimap: { enabled: false },
             lineNumbersMinChars: 3,
             glyphMargin: false,
+            accessibilitySupport: 'off',
           }}
           onMount={(editor) => {
             editorRef.current = editor;
           }}
         />
-        <pre style={{ height: '100%', whiteSpace: 'break-spaces' }}>{log}</pre>
+        <pre
+          style={{
+            padding: '0 15px',
+          }}
+        >
+          <Ansi>{log}</Ansi>
+        </pre>
       </SplitPane>
       <SaveModal
         visible={saveModalVisible}
@@ -263,7 +265,7 @@ const EditModal = ({
           content:
             editorRef.current &&
             editorRef.current.getValue().replace(/\r\n/g, '\n'),
-          filename: cNode?.title,
+          ...cNode,
         }}
       />
       <SettingModal

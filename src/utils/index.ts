@@ -1,3 +1,8 @@
+import intl from 'react-intl-universal';
+import { LANG_MAP, LOG_END_SYMBOL } from './const';
+import cron_parser from 'cron-parser';
+import { ICrontab } from '@/pages/crontab/type';
+
 export default function browserType() {
   // 权重：系统 + 系统版本 > 平台 > 内核 + 载体 + 内核版本 + 载体版本 > 外壳 + 外壳版本
   const ua = navigator.userAgent.toLowerCase();
@@ -150,9 +155,9 @@ export default function browserType() {
     shell === 'none'
       ? {}
       : {
-        shell, // wechat qq uc 360 2345 sougou liebao maxthon
-        shellVs,
-      },
+          shell, // wechat qq uc 360 2345 sougou liebao maxthon
+          shellVs,
+        },
   );
 
   console.log(
@@ -178,19 +183,15 @@ export default function browserType() {
  */
 export function getTableScroll({
   extraHeight,
-  id,
-}: { extraHeight?: number; id?: string } = {}) {
-  if (typeof extraHeight == 'undefined') {
+  target,
+}: { extraHeight?: number; target?: HTMLElement } = {}) {
+  if (typeof extraHeight === 'undefined') {
     //  47 + 40 + 12
     extraHeight = 99;
   }
   let tHeader = null;
-  if (id) {
-    tHeader = document.getElementById(id)
-      ? document
-        .getElementById(id)!
-        .getElementsByClassName('ant-table-thead')[0]
-      : null;
+  if (target) {
+    tHeader = target;
   } else {
     tHeader = document.querySelector('.ant-table-wrapper');
   }
@@ -272,4 +273,117 @@ export function depthFirstSearch<
   })(c);
 
   return c;
+}
+
+export function findNode<T extends Record<string, any> & { children?: T[] }>(
+  children: T[],
+  condition: (column: T) => boolean,
+) {
+  const c = [...children];
+
+  let item;
+  function find(cls: T[] | undefined): T | undefined {
+    if (!cls) return;
+    for (let i = 0; i < cls?.length; i++) {
+      if (condition(cls[i])) {
+        item = cls[i];
+      } else if (cls[i].children) {
+        find(cls[i].children);
+      }
+    }
+  }
+
+  find(c);
+
+  return item;
+}
+
+export function logEnded(log: string): boolean {
+  const endTips = [LOG_END_SYMBOL, intl.get('执行结束')];
+  return endTips.some((x) => log.includes(x));
+}
+
+export function getCommandScript(
+  command: string,
+): [string, string] | string | undefined {
+  const cmd = command.split(' ') as string[];
+  if (cmd[1] === 'repo' || cmd[1] === 'raw') {
+    return cmd[2];
+  }
+  let scriptsPart = cmd.find((x) =>
+    ['.js', '.ts', '.sh', '.py'].some((y) => x.endsWith(y)),
+  );
+  if (!scriptsPart) return;
+  const scriptDir = `${window.__ENV__QL_DIR}/data/scripts`;
+  if (scriptsPart.startsWith(scriptDir)) {
+    scriptsPart = scriptsPart.replace(scriptDir, '');
+  }
+
+  let p: string, s: string;
+  let index = scriptsPart.lastIndexOf('/');
+  if (index >= 0) {
+    s = scriptsPart.slice(index + 1);
+    p = scriptsPart.slice(0, index);
+  } else {
+    s = scriptsPart;
+    p = '';
+  }
+  return [s, p];
+}
+
+export function parseCrontab(schedule: string): Date | null {
+  try {
+    const time = cron_parser.parseExpression(schedule);
+    if (time) {
+      return time.next().toDate();
+    }
+  } catch (error) {}
+
+  return null;
+}
+
+export function getCrontabsNextDate(
+  schedule: string,
+  extra_schedules: ICrontab['extra_schedules'],
+): Date | null {
+  let date = parseCrontab(schedule);
+  if (extra_schedules?.length) {
+    extra_schedules.forEach((x) => {
+      const _date = parseCrontab(x.schedule);
+      if (_date && (!date || _date < date)) {
+        date = _date;
+      }
+    });
+  }
+  return date;
+}
+
+export function getExtension(filename: string) {
+  if (!filename) return '';
+  const arr = filename.split('.');
+  return `.${arr[arr.length - 1]}`;
+}
+
+export function getEditorMode(filename: string) {
+  const extension = getExtension(filename) as keyof typeof LANG_MAP;
+  return LANG_MAP[extension];
+}
+
+export function disableBody() {
+  const overlay = document.createElement('div');
+  overlay.style.position = 'fixed';
+  overlay.style.top = '0px';
+  overlay.style.left = '0px';
+  overlay.style.width = '100%';
+  overlay.style.height = '100%';
+  overlay.style.backgroundColor = 'transparent';
+  overlay.style.zIndex = '9999';
+  document.body.appendChild(overlay);
+
+  overlay.addEventListener('click', function (event) {
+    event.stopPropagation();
+    event.preventDefault();
+  });
+
+  document.body.style.overflow = 'hidden';
 }

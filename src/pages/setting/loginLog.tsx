@@ -1,7 +1,9 @@
+import intl from 'react-intl-universal';
 import React, { useEffect, useState } from 'react';
 import { Typography, Table, Tag, Button, Spin, message } from 'antd';
 import { request } from '@/utils/http';
 import config from '@/utils/config';
+import dayjs from 'dayjs';
 
 const { Text, Link } = Typography;
 
@@ -17,56 +19,61 @@ enum LoginStatusColor {
 
 const columns = [
   {
-    title: '序号',
-    align: 'center' as const,
+    title: intl.get('序号'),
     width: 50,
     render: (text: string, record: any, index: number) => {
       return index + 1;
     },
   },
   {
-    title: '登录时间',
+    title: intl.get('登录时间'),
     dataIndex: 'timestamp',
     key: 'timestamp',
-    align: 'center' as const,
+    width: 120,
     render: (text: string, record: any) => {
-      return new Date(record.timestamp).toLocaleString();
+      return dayjs(record.timestamp).format('YYYY-MM-DD HH:mm:ss');
     },
   },
   {
-    title: '登录地址',
+    title: intl.get('登录地址'),
     dataIndex: 'address',
+    width: 120,
     key: 'address',
-    align: 'center' as const,
   },
   {
-    title: '登录IP',
+    title: intl.get('登录IP'),
     dataIndex: 'ip',
+    width: 100,
     key: 'ip',
-    align: 'center' as const,
   },
   {
-    title: '登录设备',
+    title: intl.get('登录设备'),
     dataIndex: 'platform',
     key: 'platform',
-    align: 'center' as const,
+    width: 80,
   },
   {
-    title: '登录状态',
+    title: intl.get('登录状态'),
     dataIndex: 'status',
     key: 'status',
-    align: 'center' as const,
+    width: 80,
     render: (text: string, record: any) => {
       return (
         <Tag color={LoginStatusColor[record.status]} style={{ marginRight: 0 }}>
-          {LoginStatus[record.status]}
+          {intl.get(LoginStatus[record.status])}
         </Tag>
       );
     },
   },
 ];
 
-const LoginLog = ({ data }: any) => {
+const LoginLog = ({
+  data,
+  height,
+}: {
+  data: Array<object>;
+  height: number;
+}) => {
   return (
     <>
       <Table
@@ -75,7 +82,7 @@ const LoginLog = ({ data }: any) => {
         dataSource={data}
         rowKey="id"
         size="middle"
-        scroll={{ x: 768 }}
+        scroll={{ x: 1000, y: height }}
       />
     </>
   );

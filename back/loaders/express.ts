@@ -3,39 +3,37 @@ import bodyParser from 'body-parser';
 import cors from 'cors';
 import routes from '../api';
 import config from '../config';
-import jwt, { UnauthorizedError } from 'express-jwt';
-import fs from 'fs';
+import { UnauthorizedError, expressjwt } from 'express-jwt';
 import { getPlatform, getToken } from '../config/util';
-import Container from 'typedi';
-import OpenService from '../services/open';
 import rewrite from 'express-urlrewrite';
-import UserService from '../services/user';
-import handler from 'serve-handler';
-import * as Sentry from '@sentry/node';
-import { EnvModel } from '../data/env';
 import { errors } from 'celebrate';
+import { createProxyMiddleware } from 'http-proxy-middleware';
+import { serveEnv } from '../config/serverEnv';
+import Logger from './logger';
+import { IKeyvStore, shareStore } from '../shared/store';
 
 export default ({ app }: { app: Application }) => {
-  app.enable('trust proxy');
+  app.set('trust proxy', 'loopback');
   app.use(cors());
+  app.get(`${config.api.prefix}/env.js`, serveEnv);
   app.use(`${config.api.prefix}/static`, express.static(config.uploadPath));
 
-  app.use((req, res, next) => {
-    if (req.path.startsWith('/api') || req.path.startsWith('/open')) {
-      next();
-    } else {
-      return handler(req, res, {
-        public: 'static/dist',
-        rewrites: [{ source: '**', destination: '/index.html' }],
-      });
-    }
-  });
+  app.use(
+    '/api/public',
+    createProxyMiddleware({
+      target: `http://0.0.0.0:${config.publicPort}/api`,
+      changeOrigin: true,
+      pathRewrite: { '/api/public': '' },
+      logger: Logger,
+    }),
+  );
+
   app.use(bodyParser.json({ limit: '50mb' }));
   app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
 
   app.use(
-    jwt({
-      secret: config.secret as string,
+    expressjwt({
+      secret: config.secret,
       algorithms: ['HS384'],
     }).unless({
       path: [...config.apiWhiteList, /^\/open\//],
@@ -55,8 +53,10 @@ export default ({ app }: { app: Application }) => {
   app.use(async (req, res, next) => {
     const headerToken = getToken(req);
     if (req.path.startsWith('/open/')) {
-      const openService = Container.get(OpenService);
-      const doc = await openService.findTokenByValue(headerToken);
+      const apps = await shareStore.getApps();
+      const doc = apps?.filter((x) =>
+        x.tokens?.find((y) => y.value === headerToken),
+      )?.[0];
       if (doc && doc.tokens && doc.tokens.length > 0) {
         const currentToken = doc.tokens.find((x) => x.value === headerToken);
         const keyMatch = req.path.match(/\/open\/([a-z]+)\/*/);
@@ -80,9 +80,9 @@ export default ({ app }: { app: Application }) => {
       return next();
     }
 
-    const data = fs.readFileSync(config.authConfigFile, 'utf8');
-    if (data && headerToken) {
-      const { token = '', tokens = {} } = JSON.parse(data);
+    const authInfo = await shareStore.getAuthInfo();
+    if (authInfo && headerToken) {
+      const { token = '', tokens = {} } = authInfo;
       if (headerToken === token || tokens[req.platform] === headerToken) {
         return next();
       }
@@ -100,16 +100,14 @@ export default ({ app }: { app: Application }) => {
     if (!['/api/user/init', '/api/user/notification/init'].includes(req.path)) {
       return next();
     }
-    const userService = Container.get(UserService);
-    const authInfo = await userService.getUserInfo();
-    const envCount = await EnvModel.count();
+    const authInfo =
+      (await shareStore.getAuthInfo()) || ({} as IKeyvStore['authInfo']);
 
     let isInitialized = true;
     if (
       Object.keys(authInfo).length === 2 &&
       authInfo.username === 'admin' &&
-      authInfo.password === 'admin' &&
-      envCount === 0
+      authInfo.password === 'admin'
     ) {
       isInitialized = false;
     }
@@ -161,25 +159,13 @@ export default ({ app }: { app: Application }) => {
           .status(500)
           .send({
             code: 400,
-            message: `${err.name} ${err.message}`,
-            validation: err.errors,
+            message: `${err.message}`,
+            errors: err.errors,
           })
           .end();
       }
       return next(err);
     },
-  );
-
-  app.use(
-    Sentry.Handlers.errorHandler({
-      shouldHandleError(error) {
-        // 排除 SequelizeUniqueConstraintError / NotFound
-        return (
-          !['SequelizeUniqueConstraintError'].includes(error.name) ||
-          !['Not Found'].includes(error.message)
-        );
-      },
-    }),
   );
 
   app.use(
@@ -189,8 +175,6 @@ export default ({ app }: { app: Application }) => {
       res: Response,
       next: NextFunction,
     ) => {
-      Sentry.captureException(err);
-
       res.status(err.status || 500);
       res.json({
         code: err.status || 500,

@@ -1,12 +1,15 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { Statistic, Modal, Tag, Button, Spin, message } from 'antd';
-import { request } from '@/utils/http';
+import { disableBody } from '@/utils';
 import config from '@/utils/config';
-import { version } from '../../version';
+import { request } from '@/utils/http';
+import WebSocketManager from '@/utils/websocket';
+import Ansi from 'ansi-to-react';
+import { Button, Modal, Statistic, message } from 'antd';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import intl from 'react-intl-universal';
 
 const { Countdown } = Statistic;
 
-const CheckUpdate = ({ socketMessage }: any) => {
+const CheckUpdate = ({ systemInfo }: any) => {
   const [updateLoading, setUpdateLoading] = useState(false);
   const [value, setValue] = useState('');
   const modalRef = useRef<any>();
@@ -14,7 +17,7 @@ const CheckUpdate = ({ socketMessage }: any) => {
   const checkUpgrade = () => {
     if (updateLoading) return;
     setUpdateLoading(true);
-    message.loading('检查更新中...', 0);
+    message.loading(intl.get('检查更新中...'), 0);
     request
       .put(`${config.apiPrefix}system/update-check`)
       .then(({ code, data }) => {
@@ -23,7 +26,7 @@ const CheckUpdate = ({ socketMessage }: any) => {
           if (data.hasNewVersion) {
             showConfirmUpdateModal(data);
           } else {
-            showForceUpdateModal();
+            showForceUpdateModal(data);
           }
         }
       })
@@ -36,21 +39,21 @@ const CheckUpdate = ({ socketMessage }: any) => {
       });
   };
 
-  const showForceUpdateModal = () => {
+  const showForceUpdateModal = (data: any) => {
     Modal.confirm({
       width: 500,
-      title: '更新',
+      title: intl.get('更新'),
       content: (
         <>
-          <div>已经是最新版了！</div>
+          <div>{intl.get('已经是最新版了！')}</div>
           <div style={{ fontSize: 12, fontWeight: 400, marginTop: 5 }}>
-            青龙 {version} 是目前检测到的最新可用版本了。
+            {intl.get('青龙')} {data.lastVersion}{' '}
+            {intl.get('是目前检测到的最新可用版本了。')}
           </div>
         </>
       ),
-      okText: '确认',
-      cancelText: '强制更新',
-      onCancel() {
+      okText: intl.get('重新下载'),
+      onOk() {
         showUpdatingModal();
         request
           .put(`${config.apiPrefix}system/update`)
@@ -68,27 +71,20 @@ const CheckUpdate = ({ socketMessage }: any) => {
       width: 500,
       title: (
         <>
-          <div>更新可用</div>
+          <div>{intl.get('更新可用')}</div>
           <div style={{ fontSize: 12, fontWeight: 400, marginTop: 5 }}>
-            新版本{lastVersion}可用。你使用的版本为{version}。
+            {intl.get('新版本')} {lastVersion}{' '}
+            {intl.get('可用，你使用的版本为')} {systemInfo.version}。
           </div>
         </>
       ),
       content: (
-        <pre
-          style={{
-            wordBreak: 'break-all',
-            whiteSpace: 'pre-wrap',
-            paddingTop: 15,
-            fontSize: 12,
-            fontWeight: 400,
-          }}
-        >
-          {lastLog}
+        <pre>
+          <Ansi>{lastLog}</Ansi>
         </pre>
       ),
-      okText: '更新',
-      cancelText: '以后再说',
+      okText: intl.get('下载更新'),
+      cancelText: intl.get('以后再说'),
       onOk() {
         showUpdatingModal();
         request
@@ -107,96 +103,129 @@ const CheckUpdate = ({ socketMessage }: any) => {
       width: 600,
       maskClosable: false,
       closable: false,
+      keyboard: false,
       okButtonProps: { disabled: true },
-      title: '更新日志',
+      title: intl.get('下载更新中...'),
       centered: true,
       content: (
-        <div style={{ height: '60vh', overflowY: 'auto' }}>
-          <pre
-            style={{
-              wordBreak: 'break-all',
-              whiteSpace: 'pre-wrap',
-              fontSize: 12,
-              fontWeight: 400,
-            }}
-          >
-            {value}
-          </pre>
-        </div>
+        <pre>
+          <Ansi>{value}</Ansi>
+        </pre>
       ),
     });
   };
 
+  const reloadSystem = (type?: string) => {
+    request
+      .put(`${config.apiPrefix}update/${type}`)
+      .then((_data: any) => {
+        message.success({
+          content: (
+            <span>
+              {intl.get('系统将在')}
+              <Countdown
+                className="inline-countdown"
+                format="ss"
+                value={Date.now() + 1000 * 30}
+              />
+              {intl.get('秒后自动刷新')}
+            </span>
+          ),
+          duration: 30,
+        });
+        disableBody();
+        setTimeout(() => {
+          window.location.reload();
+        }, 30000);
+      })
+      .catch((error: any) => {
+        console.log(error);
+      });
+  };
+
+  const showReloadModal = () => {
+    Modal.confirm({
+      width: 600,
+      maskClosable: false,
+      title: intl.get('确认重启'),
+      centered: true,
+      content: intl.get('系统安装包下载成功，确认重启'),
+      okText: intl.get('重启'),
+      onOk() {
+        reloadSystem('system');
+      },
+      onCancel() {
+        modalRef.current.update({
+          maskClosable: true,
+          closable: true,
+          okButtonProps: { disabled: false },
+        });
+      },
+    });
+  };
+
   useEffect(() => {
-    if (!modalRef.current || !socketMessage) {
-      return;
-    }
-    const { type, message: _message, references } = socketMessage;
-
-    if (type !== 'updateSystemVersion') {
-      return;
-    }
-
-    const newMessage = `${value}${_message}`;
-    const updateFailed = newMessage.includes('失败，请检查');
+    if (!value) return;
+    const updateFailed = value.includes('失败，请检查');
 
     modalRef.current.update({
       maskClosable: updateFailed,
       closable: updateFailed,
       okButtonProps: { disabled: !updateFailed },
       content: (
-        <div style={{ height: '60vh', overflowY: 'auto' }}>
-          <pre
-            style={{
-              wordBreak: 'break-all',
-              whiteSpace: 'pre-wrap',
-              fontSize: 12,
-              fontWeight: 400,
-            }}
-          >
-            {newMessage}
+        <>
+          <pre>
+            <Ansi>{value}</Ansi>
           </pre>
           <div id="log-identifier" style={{ paddingBottom: 5 }}></div>
-        </div>
+        </>
       ),
     });
+  }, [value]);
 
-    if (updateFailed && !value.includes('失败，请检查')) {
-      message.error('更新失败，请检查网络及日志或稍后再试');
+  const handleMessage = useCallback((payload: any) => {
+    let { message: _message } = payload;
+    const updateFailed = _message.includes('失败，请检查');
+
+    if (updateFailed) {
+      message.error(intl.get('更新失败，请检查网络及日志或稍后再试'));
     }
 
-    setValue(newMessage);
-
-    document.getElementById('log-identifier') &&
+    setTimeout(() => {
       document
-        .getElementById('log-identifier')!
-        .scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        .querySelector('#log-identifier')!
+        .scrollIntoView({ behavior: 'smooth' });
+    }, 600);
 
-    if (_message.includes('重启面板')) {
-      message.warning({
-        content: (
-          <span>
-            系统将在
-            <Countdown
-              className="inline-countdown"
-              format="ss"
-              value={Date.now() + 1000 * 30}
-            />
-            秒后自动刷新
-          </span>
-        ),
-        duration: 30,
-      });
+    if (_message.includes('更新包下载成功')) {
       setTimeout(() => {
-        window.location.reload();
-      }, 30000);
+        showReloadModal();
+      }, 1000);
     }
-  }, [socketMessage]);
+
+    setValue((p) => `${p}${_message}`);
+  }, []);
+
+  useEffect(() => {
+    const ws = WebSocketManager.getInstance();
+    ws.subscribe('updateSystemVersion', handleMessage);
+
+    return () => {
+      ws.unsubscribe('updateSystemVersion', handleMessage);
+    };
+  }, []);
 
   return (
     <>
       <Button type="primary" onClick={checkUpgrade}>
-        检查更新
+        {intl.get('检查更新')}
+      </Button>
+      <Button
+        type="primary"
+        onClick={() => reloadSystem('reload')}
+        style={{ marginLeft: 8 }}
+      >
+        {intl.get('重新启动')}
       </Button>
     </>
   );

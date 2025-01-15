@@ -15,6 +15,7 @@ export default (app: Router) => {
       const subscriptionService = Container.get(SubscriptionService);
       const data = await subscriptionService.list(
         req.query.searchValue as string,
+        req.query.ids as string,
       );
       return res.send({ code: 200, data });
     } catch (e) {
@@ -49,6 +50,9 @@ export default (app: Router) => {
         sub_after: Joi.string().optional().allow('').allow(null),
         schedule_type: Joi.string().required(),
         alias: Joi.string().required(),
+        proxy: Joi.string().optional().allow('').allow(null),
+        autoAddCron: Joi.boolean().optional().allow('').allow(null),
+        autoDelCron: Joi.boolean().optional().allow('').allow(null),
       }),
     }),
     async (req: Request, res: Response, next: NextFunction) => {
@@ -177,6 +181,9 @@ export default (app: Router) => {
         sub_before: Joi.string().optional().allow('').allow(null),
         sub_after: Joi.string().optional().allow('').allow(null),
         alias: Joi.string().required(),
+        proxy: Joi.string().optional().allow('').allow(null),
+        autoAddCron: Joi.boolean().optional().allow('').allow(null),
+        autoDelCron: Joi.boolean().optional().allow('').allow(null),
         id: Joi.number().required(),
       }),
     }),
@@ -204,12 +211,16 @@ export default (app: Router) => {
     '/',
     celebrate({
       body: Joi.array().items(Joi.number().required()),
+      query: Joi.object({
+        force: Joi.boolean().optional(),
+        t: Joi.number(),
+      }),
     }),
     async (req: Request, res: Response, next: NextFunction) => {
       const logger: Logger = Container.get('logger');
       try {
         const subscriptionService = Container.get(SubscriptionService);
-        const data = await subscriptionService.remove(req.body);
+        const data = await subscriptionService.remove(req.body, req.query);
         return res.send({ code: 200, data });
       } catch (e) {
         return next(e);

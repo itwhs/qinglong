@@ -7,18 +7,23 @@ import linkDeps from './deps';
 import initTask from './initTask';
 
 export default async ({ expressApp }: { expressApp: Application }) => {
-  await depInjectorLoader();
-  Logger.info('✌️ Dependency Injector loaded');
-
-  await expressLoader({ app: expressApp });
-  Logger.info('✌️ Express loaded');
+  depInjectorLoader();
+  Logger.info('✌️ Dependency loaded');
+  console.log('✌️ Dependency loaded');
 
   await initData();
-  Logger.info('✌️ init data loaded');
+  Logger.info('✌️ Init data loaded');
+  console.log('✌️ Init data loaded');
 
   await linkDeps();
-  Logger.info('✌️ link deps loaded');
+  Logger.info('✌️ Link deps loaded');
+  console.log('✌️ Link deps loaded');
 
   initTask();
-  Logger.info('✌️ init task loaded');
+  Logger.info('✌️ Init task loaded');
+  console.log('✌️ Init task loaded');
+
+  expressLoader({ app: expressApp });
+  Logger.info('✌️ Express loaded');
+  console.log('✌️ Express loaded');
 };

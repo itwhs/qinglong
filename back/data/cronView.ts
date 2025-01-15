@@ -1,13 +1,19 @@
 import { sequelize } from '.';
 import { DataTypes, Model } from 'sequelize';
 
+export enum CronViewType {
+  '系统' = 1,
+  '个人',
+}
+
 interface SortType {
   type: 'ASC' | 'DESC';
   value: string;
 }
 
 interface FilterType {
-  type: 'or' | 'and';
+  property: string;
+  operation: string;
   value: string;
 }
 
@@ -18,6 +24,8 @@ export class CrontabView {
   isDisabled?: 1 | 0;
   filters?: FilterType[];
   sorts?: SortType[];
+  filterRelation?: 'and' | 'or';
+  type?: CronViewType;
 
   constructor(options: CrontabView) {
     this.name = options.name;
@@ -26,10 +34,12 @@ export class CrontabView {
     this.isDisabled = options.isDisabled || 0;
     this.filters = options.filters;
     this.sorts = options.sorts;
+    this.filterRelation = options.filterRelation;
+    this.type = options.type || CronViewType.个人;
   }
 }
 
-interface CronViewInstance
+export interface CronViewInstance
   extends Model<CrontabView, CrontabView>,
     CrontabView {}
 export const CrontabViewModel = sequelize.define<CronViewInstance>(
@@ -43,5 +53,10 @@ export const CrontabViewModel = sequelize.define<CronViewInstance>(
     isDisabled: DataTypes.NUMBER,
     filters: DataTypes.JSON,
     sorts: DataTypes.JSON,
+    filterRelation: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    type: DataTypes.NUMBER,
   },
 );

@@ -1,3 +1,4 @@
+import intl from 'react-intl-universal';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Modal,
@@ -75,22 +76,32 @@ const ViewManageModal = ({
   handleCancel: () => void;
   cronViewChange: (data?: any) => void;
 }) => {
+  const islastEnableView = (record) => {
+    return list.filter((x) => !x.isDisabled).length <= 1 && !record.isDisabled;
+  };
+
   const columns: any = [
     {
-      title: '名称',
+      title: intl.get('名称'),
       dataIndex: 'name',
       key: 'name',
-      align: 'center' as const,
+      render: (v) => (v === '全部任务' ? intl.get('全部任务') : v)
     },
     {
-      title: '显示',
+      title: intl.get('类型'),
+      dataIndex: 'type',
+      key: 'type',
+      render: (v) => (v === 1 ? intl.get('系统') : intl.get('个人')),
+    },
+    {
+      title: intl.get('显示'),
       key: 'isDisabled',
       dataIndex: 'isDisabled',
-      align: 'center' as const,
       width: 100,
       render: (text: string, record: any, index: number) => {
         return (
           <Switch
+            disabled={islastEnableView(record)}
             checked={!record.isDisabled}
             onChange={(checked) => onShowChange(checked, record, index)}
           />
@@ -98,20 +109,23 @@ const ViewManageModal = ({
       },
     },
     {
-      title: '操作',
+      title: intl.get('操作'),
       key: 'action',
-      width: 140,
-      align: 'center' as const,
+      width: 100,
       render: (text: string, record: any, index: number) => {
-        return (
+        return record.type !== 1 ? (
           <Space size="middle">
             <a onClick={() => editView(record, index)}>
               <EditOutlined />
             </a>
-            <a onClick={() => deleteView(record, index)}>
-              <DeleteOutlined />
-            </a>
+            {!islastEnableView(record) && (
+              <a onClick={() => deleteView(record, index)}>
+                <DeleteOutlined />
+              </a>
+            )}
           </Space>
+        ) : (
+          '-'
         );
       },
     },
@@ -128,14 +142,14 @@ const ViewManageModal = ({
 
   const deleteView = (record: any, index: number) => {
     Modal.confirm({
-      title: '确认删除',
+      title: intl.get('确认删除'),
       content: (
         <>
-          确认删除视图{' '}
+          {intl.get('确认删除视图')}{' '}
           <Text style={{ wordBreak: 'break-all' }} type="warning">
             {record.name}
           </Text>{' '}
-          吗
+          {intl.get('吗')}
         </>
       ),
       onOk() {
@@ -143,7 +157,7 @@ const ViewManageModal = ({
           .delete(`${config.apiPrefix}crons/views`, { data: [record.id] })
           .then(({ code, data }) => {
             if (code === 200) {
-              message.success('删除成功');
+              message.success(intl.get('删除成功'));
               cronViewChange();
             }
           });
@@ -155,11 +169,10 @@ const ViewManageModal = ({
   };
 
   const onShowChange = (checked: boolean, record: any, index: number) => {
-    console.log(checked);
     request
-      .put(`${config.apiPrefix}crons/views/${checked ? 'enable' : 'disable'}`, {
-        data: [record.id],
-      })
+      .put(`${config.apiPrefix}crons/views/${checked ? 'enable' : 'disable'}`, [
+        record.id,
+      ])
       .then(({ code, data }) => {
         if (code === 200) {
           const _list = [...list];
@@ -184,7 +197,9 @@ const ViewManageModal = ({
       const dragRow = list[dragIndex];
       request
         .put(`${config.apiPrefix}crons/views/move`, {
-          data: { fromIndex: dragIndex, toIndex: hoverIndex, id: dragRow.id },
+          fromIndex: dragIndex,
+          toIndex: hoverIndex,
+          id: dragRow.id,
         })
         .then(({ code, data }) => {
           if (code === 200) {
@@ -205,7 +220,7 @@ const ViewManageModal = ({
 
   return (
     <Modal
-      title="视图管理"
+      title={intl.get('视图管理')}
       open={visible}
       centered
       width={620}
@@ -230,7 +245,7 @@ const ViewManageModal = ({
             setIsCreateViewModalVisible(true);
           }}
         >
-          新建视图
+          {intl.get('创建视图')}
         </Button>
       </Space>
       <DndProvider backend={HTML5Backend}>

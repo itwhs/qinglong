@@ -13,11 +13,14 @@ export class Env {
   constructor(options: Env) {
     this.value = options.value;
     this.id = options.id;
-    this.status = options.status || EnvStatus.normal;
+    this.status =
+      typeof options.status === 'number' && EnvStatus[options.status]
+        ? options.status
+        : EnvStatus.normal;
     this.timestamp = new Date().toString();
     this.position = options.position;
     this.name = options.name;
-    this.remarks = options.remarks;
+    this.remarks = options.remarks || '';
   }
 }
 
@@ -26,9 +29,12 @@ export enum EnvStatus {
   'disabled',
 }
 
-export const initEnvPosition = 9999999999;
+export const maxPosition = 9000000000000000;
+export const initPosition = 4500000000000000;
+export const stepPosition = 10000000000;
+export const minPosition = 100;
 
-interface EnvInstance extends Model<Env, Env>, Env {}
+export interface EnvInstance extends Model<Env, Env>, Env {}
 export const EnvModel = sequelize.define<EnvInstance>('Env', {
   value: { type: DataTypes.STRING, unique: 'compositeIndex' },
   timestamp: DataTypes.STRING,

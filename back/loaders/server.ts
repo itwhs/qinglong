@@ -6,11 +6,11 @@ export default async ({ server }: { server: Server }) => {
   await Sock({ server });
   Logger.info('✌️ Sock loaded');
 
-  process.on('SIGINT', () => {
-    Logger.info('✌️ Server need close');
-    server.close(() => {
-      Logger.info('✌️ Server closed');
-      process.exit(0);
-    });
+  process.on('uncaughtException', (error) => {
+    Logger.error('Uncaught exception:', error);
+  });
+
+  process.on('unhandledRejection', (reason, promise) => {
+    Logger.error('Unhandled rejection:', reason, promise);
   });
 };

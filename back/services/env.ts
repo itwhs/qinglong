@@ -1,11 +1,19 @@
 import { Service, Inject } from 'typedi';
 import winston from 'winston';
-import { getFileContentByName } from '../config/util';
 import config from '../config';
-import * as fs from 'fs';
-import { Env, EnvModel, EnvStatus, initEnvPosition } from '../data/env';
-import _ from 'lodash';
-import { Op } from 'sequelize';
+import * as fs from 'fs/promises';
+import {
+  Env,
+  EnvModel,
+  EnvStatus,
+  initPosition,
+  maxPosition,
+  minPosition,
+  stepPosition,
+} from '../data/env';
+import groupBy from 'lodash/groupBy';
+import { FindOptions, Op } from 'sequelize';
+import { writeFileWithLock } from '../shared/utils';
 
 @Service()
 export default class EnvService {
@@ -13,22 +21,27 @@ export default class EnvService {
 
   public async create(payloads: Env[]): Promise<Env[]> {
     const envs = await this.envs();
-    let position = initEnvPosition;
-    if (envs && envs.length > 0 && envs[envs.length - 1].position) {
-      position = envs[envs.length - 1].position as number;
+    let position = initPosition;
+    if (
+      envs &&
+      envs.length > 0 &&
+      typeof envs[envs.length - 1].position === 'number'
+    ) {
+      position = envs[envs.length - 1].position!;
     }
     const tabs = payloads.map((x) => {
-      position = position / 2;
+      position = position - stepPosition;
       const tab = new Env({ ...x, position });
       return tab;
     });
     const docs = await this.insert(tabs);
     await this.set_envs();
+    await this.checkPosition(tabs[tabs.length - 1].position!);
     return docs;
   }
 
   public async insert(payloads: Env[]): Promise<Env[]> {
-    const result = [];
+    const result: Env[] = [];
     for (const env of payloads) {
       const doc = await EnvModel.create(env, { returning: true });
       result.push(doc);
@@ -37,7 +50,9 @@ export default class EnvService {
   }
 
   public async update(payload: Env): Promise<Env> {
-    const newDoc = await this.updateDb(payload);
+    const doc = await this.getDb({ id: payload.id });
+    const tab = new Env({ ...doc, ...payload });
+    const newDoc = await this.updateDb(tab);
     await this.set_envs();
     return newDoc;
   }
@@ -47,7 +62,7 @@ export default class EnvService {
     return await this.getDb({ id: payload.id });
   }
 
-  public async remove(ids: string[]) {
+  public async remove(ids: number[]) {
     await EnvModel.destroy({ where: { id: ids } });
     await this.set_envs();
   }
@@ -67,28 +82,47 @@ export default class EnvService {
     const envs = await this.envs();
     if (toIndex === 0 || toIndex === envs.length - 1) {
       targetPosition = isUpward
-        ? envs[0].position! * 2
-        : envs[toIndex].position! / 2;
+        ? envs[0].position! + stepPosition
+        : envs[toIndex].position! - stepPosition;
     } else {
       targetPosition = isUpward
         ? (envs[toIndex].position! + envs[toIndex - 1].position!) / 2
         : (envs[toIndex].position! + envs[toIndex + 1].position!) / 2;
     }
+
     const newDoc = await this.update({
       id,
-      position: targetPosition,
+      position: this.getPrecisionPosition(targetPosition),
     });
+
+    await this.checkPosition(targetPosition, envs[toIndex].position!);
     return newDoc;
   }
 
-  public async envs(
-    searchText: string = '',
-    sort: any = { position: -1 },
-    query: any = {},
-  ): Promise<Env[]> {
+  private async checkPosition(position: number, edge: number = 0) {
+    const precisionPosition = parseFloat(position.toPrecision(16));
+    if (
+      precisionPosition < minPosition ||
+      precisionPosition > maxPosition ||
+      Math.abs(precisionPosition - edge) < minPosition
+    ) {
+      const envs = await this.envs();
+      let position = initPosition;
+      for (const env of envs) {
+        position = position - stepPosition;
+        await this.updateDb({ id: env.id, position });
+      }
+    }
+  }
+
+  private getPrecisionPosition(position: number): number {
+    return parseFloat(position.toPrecision(16));
+  }
+
+  public async envs(searchText: string = '', query: any = {}): Promise<Env[]> {
     let condition = { ...query };
     if (searchText) {
-      const encodeText = encodeURIComponent(searchText);
+      const encodeText = encodeURI(searchText);
       const reg = {
         [Op.or]: [
           { [Op.like]: `%${searchText}%` },
@@ -113,11 +147,10 @@ export default class EnvService {
     }
     try {
       const result = await this.find(condition, [
-        ['status', 'ASC'],
         ['position', 'DESC'],
-        ['createdAt', 'DESC'],
+        ['createdAt', 'ASC'],
       ]);
-      return result as any;
+      return result;
     } catch (error) {
       throw error;
     }
@@ -128,15 +161,18 @@ export default class EnvService {
       where: { ...query },
       order: [...sort],
     });
-    return docs;
+    return docs.map((x) => x.get({ plain: true }));
   }
 
-  public async getDb(query: any): Promise<Env> {
+  public async getDb(query: FindOptions<Env>['where']): Promise<Env> {
     const doc: any = await EnvModel.findOne({ where: { ...query } });
-    return doc && (doc.get({ plain: true }) as Env);
+    if (!doc) {
+      throw new Error(`Env ${JSON.stringify(query)} not found`);
+    }
+    return doc.get({ plain: true });
   }
 
-  public async disabled(ids: string[]) {
+  public async disabled(ids: number[]) {
     await EnvModel.update(
       { status: EnvStatus.disabled },
       { where: { id: ids } },
@@ -144,42 +180,54 @@ export default class EnvService {
     await this.set_envs();
   }
 
-  public async enabled(ids: string[]) {
+  public async enabled(ids: number[]) {
     await EnvModel.update({ status: EnvStatus.normal }, { where: { id: ids } });
     await this.set_envs();
   }
 
-  public async updateNames({ ids, name }: { ids: string[]; name: string }) {
+  public async updateNames({ ids, name }: { ids: number[]; name: string }) {
     await EnvModel.update({ name }, { where: { id: ids } });
     await this.set_envs();
   }
 
   public async set_envs() {
-    const envs = await this.envs(
-      '',
-      { position: -1 },
-      { name: { [Op.not]: null } },
-    );
-    const groups = _.groupBy(envs, 'name');
+    const envs = await this.envs('', {
+      name: { [Op.not]: null },
+      status: EnvStatus.normal,
+    });
+    const groups = groupBy(envs, 'name');
     let env_string = '';
+    let js_env_string = '';
+    let py_env_string = 'import os\n';
     for (const key in groups) {
       if (Object.prototype.hasOwnProperty.call(groups, key)) {
         const group = groups[key];
 
         // 忽略不符合bash要求的环境变量名称
-        if (/^[a-zA-Z_][0-9a-zA-Z_]+$/.test(key)) {
-          let value = _(group)
-            .filter((x) => x.status !== EnvStatus.disabled)
-            .map('value')
+        if (/^[a-zA-Z_][0-9a-zA-Z_]*$/.test(key)) {
+          let value = group
+            .map((x) => x.value)
             .join('&')
-            .replace(/(\\)[^n]/g, '\\\\')
-            .replace(/(\\$)/, '\\\\')
-            .replace(/"/g, '\\"')
+            .replace(/'/g, "'\\''")
             .trim();
-          env_string += `export ${key}="${value}"\n`;
+          env_string += `export ${key}='${value}'\n`;
+          const _env_value = `${group
+            .map((x) => x.value)
+            .join('&')
+            .replace(/\\/g, '\\\\')}`;
+          js_env_string += `process.env.${key}=\`${_env_value.replace(
+            /\`/g,
+            '\\`',
+          )}\`;\n`;
+          py_env_string += `os.environ['${key}']='''${_env_value.replace(
+            /\'/g,
+            "\\'",
+          )}'''\n`;
         }
       }
     }
-    fs.writeFileSync(config.envFile, env_string);
+    await writeFileWithLock(config.envFile, env_string);
+    await writeFileWithLock(config.jsEnvFile, js_env_string);
+    await writeFileWithLock(config.pyEnvFile, py_env_string);
   }
 }
